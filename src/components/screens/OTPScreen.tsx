@@ -1,123 +1,126 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, Mail, Loader2, CheckCircle2 } from 'lucide-react';
+import { checkEmailVerified, resendVerificationEmail } from '@/services/auth';
 
 interface OTPScreenProps {
-  phone: string;
+  phone?: string;
+  email?: string;
   onVerify: () => void;
   onBack: () => void;
 }
 
-export function OTPScreen({ phone, onVerify, onBack }: OTPScreenProps) {
-  const [otp, setOtp] = useState(['', '', '', '', '', '']);
-  const [timer, setTimer] = useState(30);
-  const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
+export function OTPScreen({ email = '', onVerify, onBack }: OTPScreenProps) {
+  const [checking, setChecking] = useState(false);
+  const [verified, setVerified] = useState(false);
+  const [resendTimer, setResendTimer] = useState(60);
+  const [resending, setResending] = useState(false);
+  const [error, setError] = useState('');
 
+  // Auto-poll every 3 seconds to check if user clicked the link
   useEffect(() => {
-    if (timer > 0) {
-      const interval = setInterval(() => setTimer(t => t - 1), 1000);
-      return () => clearInterval(interval);
-    }
-  }, [timer]);
+    const interval = setInterval(async () => {
+      const isVerified = await checkEmailVerified();
+      if (isVerified) {
+        clearInterval(interval);
+        setVerified(true);
+        setTimeout(onVerify, 1200);
+      }
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [onVerify]);
 
-  const handleChange = (index: number, value: string) => {
-    if (value.length > 1) value = value[0];
-    if (!/^\d*$/.test(value)) return;
+  // Resend countdown
+  useEffect(() => {
+    if (resendTimer <= 0) return;
+    const t = setInterval(() => setResendTimer(p => p - 1), 1000);
+    return () => clearInterval(t);
+  }, [resendTimer]);
 
-    const newOtp = [...otp];
-    newOtp[index] = value;
-    setOtp(newOtp);
-
-    if (value && index < 5) {
-      inputRefs.current[index + 1]?.focus();
-    }
-
-    if (newOtp.every(d => d) && newOtp.join('').length === 6) {
-      setTimeout(onVerify, 300);
+  const handleCheckNow = async () => {
+    setChecking(true);
+    setError('');
+    const isVerified = await checkEmailVerified();
+    setChecking(false);
+    if (isVerified) {
+      setVerified(true);
+      setTimeout(onVerify, 1000);
+    } else {
+      setError('Email not verified yet. Please click the link in your inbox.');
     }
   };
 
-  const handleKeyDown = (index: number, e: React.KeyboardEvent) => {
-    if (e.key === 'Backspace' && !otp[index] && index > 0) {
-      inputRefs.current[index - 1]?.focus();
-    }
+  const handleResend = async () => {
+    setResending(true);
+    const { error: err } = await resendVerificationEmail();
+    setResending(false);
+    if (err) setError(err);
+    else setResendTimer(60);
   };
 
   return (
     <div className="flex flex-col min-h-screen bg-background">
-      {/* Header */}
       <div className="flex items-center gap-4 px-4 py-4">
-        <button 
-          onClick={onBack}
-          className="w-10 h-10 flex items-center justify-center rounded-full hover:bg-secondary transition-colors"
-        >
+        <button onClick={onBack} className="w-10 h-10 flex items-center justify-center rounded-full hover:bg-secondary transition-colors">
           <ArrowLeft className="w-5 h-5 text-foreground" />
         </button>
-        <h1 className="text-lg font-semibold text-foreground">Verify Phone</h1>
+        <h1 className="text-lg font-semibold text-foreground">Verify Email</h1>
       </div>
 
-      <div className="flex-1 px-6 pt-8">
-        {/* Illustration */}
-        <div className="w-20 h-20 mx-auto mb-8 rounded-full bg-primary/10 flex items-center justify-center">
-          <svg className="w-10 h-10 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z" />
-          </svg>
+      <div className="flex-1 px-6 pt-8 flex flex-col items-center">
+        <div className={`w-20 h-20 mx-auto mb-8 rounded-full flex items-center justify-center transition-colors ${verified ? 'bg-green-500/10' : 'bg-primary/10'}`}>
+          {verified
+            ? <CheckCircle2 className="w-10 h-10 text-green-500" />
+            : <Mail className="w-10 h-10 text-primary" />
+          }
         </div>
 
-        {/* Text */}
         <h2 className="text-2xl font-bold text-foreground text-center mb-2">
-          Enter verification code
+          {verified ? 'Email Verified!' : 'Check your email'}
         </h2>
-        <p className="text-muted-foreground text-center mb-8">
-          We sent a 6-digit code to{' '}
-          <span className="text-foreground font-medium">{phone || '+91 98765 43210'}</span>
+        <p className="text-muted-foreground text-center mb-2 leading-relaxed">
+          {verified
+            ? 'Your email has been verified. Taking you to the next step...'
+            : <>We sent a verification link to{' '}<span className="text-foreground font-semibold">{email}</span></>
+          }
         </p>
 
-        {/* OTP Inputs */}
-        <div className="flex justify-center gap-3 mb-8">
-          {otp.map((digit, index) => (
-            <input
-              key={index}
-              ref={el => inputRefs.current[index] = el}
-              type="text"
-              inputMode="numeric"
-              maxLength={1}
-              value={digit}
-              onChange={e => handleChange(index, e.target.value)}
-              onKeyDown={e => handleKeyDown(index, e)}
-              className="w-12 h-14 text-center text-xl font-bold rounded-xl border-2 border-border bg-card text-foreground focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none transition-all"
-            />
-          ))}
-        </div>
+        {!verified && (
+          <p className="text-sm text-muted-foreground text-center mb-8">
+            Click the link in the email to verify your account. This page will update automatically.
+          </p>
+        )}
 
-        {/* Resend */}
-        <div className="text-center">
-          {timer > 0 ? (
-            <p className="text-muted-foreground">
-              Resend code in <span className="text-primary font-semibold">{timer}s</span>
-            </p>
-          ) : (
-            <button 
-              onClick={() => setTimer(30)}
-              className="text-primary font-semibold hover:underline"
-            >
-              Resend Code
-            </button>
-          )}
-        </div>
-      </div>
+        {error && (
+          <div className="w-full bg-destructive/10 border border-destructive/20 rounded-xl px-4 py-3 mb-4">
+            <p className="text-sm text-destructive text-center">{error}</p>
+          </div>
+        )}
 
-      {/* Continue Button */}
-      <div className="px-6 pb-8 pt-4">
-        <Button 
-          variant="hero" 
-          size="xl" 
-          className="w-full"
-          onClick={onVerify}
-          disabled={!otp.every(d => d)}
-        >
-          Verify & Continue
-        </Button>
+        {!verified && (
+          <div className="w-full space-y-3">
+            <Button variant="hero" size="xl" className="w-full" onClick={handleCheckNow} disabled={checking}>
+              {checking ? <><Loader2 className="w-4 h-4 animate-spin" /> Checking...</> : "I've verified my email"}
+            </Button>
+
+            <div className="text-center">
+              {resendTimer > 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  Resend email in <span className="text-primary font-semibold">{resendTimer}s</span>
+                </p>
+              ) : (
+                <button onClick={handleResend} disabled={resending} className="text-sm text-primary font-semibold hover:underline">
+                  {resending ? 'Sending...' : 'Resend verification email'}
+                </button>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2 bg-primary/5 rounded-xl p-3 mt-4">
+              <Loader2 className="w-4 h-4 text-primary animate-spin flex-shrink-0" />
+              <p className="text-xs text-muted-foreground">Checking automatically every few seconds...</p>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

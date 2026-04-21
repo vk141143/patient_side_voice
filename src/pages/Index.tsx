@@ -5,13 +5,14 @@ import { WelcomeScreen } from '@/components/screens/WelcomeScreen';
 import { OTPScreen } from '@/components/screens/OTPScreen';
 import { ProfileScreen } from '@/components/screens/ProfileScreen';
 import { HomeScreen } from '@/components/screens/HomeScreen';
-import { SymptomsScreen } from '@/components/screens/SymptomsScreen';
+import { SymptomsScreen, ConsultMode } from '@/components/screens/SymptomsScreen';
 import { MatchingScreen } from '@/components/screens/MatchingScreen';
 import { AvailableDoctorsScreen } from '@/components/screens/AvailableDoctorsScreen';
 import { ChatScreen } from '@/components/screens/ChatScreen';
 import { PrescriptionScreen } from '@/components/screens/PrescriptionScreen';
 import { RecordsScreen } from '@/components/screens/RecordsScreen';
 import { UserProfileScreen } from '@/components/screens/UserProfileScreen';
+import { UserNotificationsScreen } from '@/components/screens/UserProfileScreen';
 import { PaymentScreen } from '@/components/screens/PaymentScreen';
 import { PharmacySelectionScreen } from '@/components/screens/PharmacySelectionScreen';
 import { OrderConfirmationScreen } from '@/components/screens/OrderConfirmationScreen';
@@ -39,6 +40,7 @@ import { BookingsScreen } from '@/components/screens/BookingsScreen';
 import { AuthChoiceScreen } from '@/components/screens/AuthChoiceScreen';
 import { LoginScreen } from '@/components/screens/LoginScreen';
 import { PhoneEntryScreen } from '@/components/screens/PhoneEntryScreen';
+import { ForgotPasswordScreen } from '@/components/screens/ForgotPasswordScreen';
 import { LocationAccessScreen } from '@/components/screens/LocationAccessScreen';
 // Doctor Registration Flow
 import { DoctorWelcomeScreen } from '@/components/screens/doctor-registration/DoctorWelcomeScreen';
@@ -51,7 +53,9 @@ import { DoctorLegalConsentScreen } from '@/components/screens/doctor-registrati
 import { DoctorVerificationStatusScreen } from '@/components/screens/doctor-registration/DoctorVerificationStatusScreen';
 import { DoctorApprovalSuccessScreen } from '@/components/screens/doctor-registration/DoctorApprovalSuccessScreen';
 import { BottomNav } from '@/components/BottomNav';
-import { Doctor, Message, Prescription, Hospital, ConsultationType, Specialty, Appointment } from '@/types/app';
+import { Doctor, Hospital, ConsultationType, Specialty, Appointment } from '@/types/app';
+import { supabase } from '@/lib/supabase';
+import { format } from 'date-fns';
 
 function AppContent() {
   const {
@@ -65,19 +69,19 @@ function AppContent() {
     setSelectedSymptoms,
     currentDoctor,
     setCurrentDoctor,
-    messages,
-    addMessage,
     consultations,
     currentPrescription,
-    setCurrentPrescription,
     walletBalance,
-    setWalletBalance,
+    deductWallet,
+    addToWallet,
     appointments,
     addAppointment,
     cancelAppointment,
   } = useApp();
 
   const [phone, setPhone] = useState('');
+  const [regEmail, setRegEmail] = useState('');
+  const [regPassword, setRegPassword] = useState('');
   const [consultationType, setConsultationType] = useState<ConsultationType>('hospital');
   const [selectedSpecialty, setSelectedSpecialty] = useState<Specialty>('general-physician');
   const [selectedHospital, setSelectedHospital] = useState<Hospital | null>(null);
@@ -87,139 +91,152 @@ function AppContent() {
   const [homeVisitAddress, setHomeVisitAddress] = useState<string>('');
   const [doctorName, setDoctorName] = useState<string>('');
   const [selectedAppointment, setSelectedAppointment] = useState<Appointment | null>(null);
-  const [availableDoctors, setAvailableDoctors] = useState<Doctor[]>([]);
   const [searchedSpecialty, setSearchedSpecialty] = useState<string>('');
-
-  const sampleDoctor: Doctor = {
-    id: '1',
-    name: 'Dr. Priya Sharma',
-    specialization: 'General Physician',
-    rating: 4.9,
-    experience: '12 years',
-    avatar: '',
-    verified: true,
-    fee: 599,
-    availability: 'Available now',
+  const [bonusMinutesForChat, setBonusMinutesForChat] = useState<number>(0);
+  const [symptomData, setSymptomData] = useState<{ description: string; symptoms: string[]; reportUrl?: string }>({ description: '', symptoms: [] });
+  const [consultMode, setConsultMode] = useState<ConsultMode>('instant');
+  const [chatFee, setChatFee] = useState<number>(0); // actual fee to deduct on session end
+  const [consultRequestId, setConsultRequestIdState] = useState<string | null>(() => localStorage.getItem('mc_consult_id'));
+  const [chatSessionData, setChatSessionData] = useState<any | null>(null);
+  const [chatRxId, setChatRxId] = useState<string | null>(null);
+  const setConsultRequestId = (id: string | null) => {
+    if (id) localStorage.setItem('mc_consult_id', id);
+    else localStorage.removeItem('mc_consult_id');
+    setConsultRequestIdState(id);
   };
 
-  const samplePrescription: Prescription = {
-    id: '1',
-    doctor: sampleDoctor,
-    date: new Date(),
-    diagnosis: 'Viral Fever with mild upper respiratory infection',
-    advice: [
-      'Take plenty of rest and stay hydrated',
-      'Avoid cold foods and drinks',
-      'Monitor temperature every 4 hours',
-      'Revisit if fever persists beyond 3 days',
-    ],
-    medicines: [
-      { name: 'Paracetamol 650mg', dosage: '1 tablet when fever > 100°F', duration: '3 days', timing: 'Every 6 hours if needed', type: 'generic', price: 45 },
-      { name: 'Cetirizine 10mg', dosage: '1 tablet at bedtime', duration: '5 days', timing: 'Night only', type: 'generic', price: 35 },
-      { name: 'Vitamin C 500mg', dosage: '1 tablet daily', duration: '7 days', timing: 'After breakfast', type: 'branded', price: 120 },
-    ],
+  const handleRecharge = async (amt: number) => {
+    await addToWallet(amt);
   };
-
-  const sampleAppointments: Appointment[] = [
-    {
-      id: '1',
-      doctor: sampleDoctor,
-      hospital: { id: '1', name: 'Apollo Clinic', address: 'Sector 21, Gurugram', distance: '2.5 km', rating: 4.5, availableDoctors: 12, opdFeeRange: '₹300-500' },
-      type: 'hospital',
-      date: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000),
-      timeSlot: '10:30 AM',
-      fee: 500,
-      status: 'confirmed',
-    },
-    {
-      id: '2',
-      doctor: { ...sampleDoctor, id: '2', name: 'Dr. Amit Patel', specialization: 'Dermatologist' },
-      type: 'home',
-      date: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000),
-      timeSlot: '4:00 PM',
-      fee: 800,
-      status: 'pending',
-      address: '123, Green Valley Apartments',
-    },
-    {
-      id: '3',
-      doctor: { ...sampleDoctor, id: '3', name: 'Dr. Neha Singh', specialization: 'Pediatrician' },
-      hospital: { id: '2', name: 'Max Hospital', address: 'Saket, Delhi', distance: '8 km', rating: 4.8, availableDoctors: 25, opdFeeRange: '₹500-800' },
-      type: 'hospital',
-      date: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000),
-      timeSlot: '11:00 AM',
-      fee: 600,
-      status: 'completed',
-    },
-  ];
 
   const showBottomNav = ['home', 'bookings', 'records', 'prescription', 'user-profile'].includes(currentScreen);
   const TOTAL_DOCTOR_REG_STEPS = 7;
-
-  const handleSendMessage = (text: string) => {
-    const userMsg: Message = { id: Date.now().toString(), sender: 'user', text, timestamp: new Date(), read: true };
-    addMessage(userMsg);
-    setTimeout(() => {
-      const responses = [
-        "I understand. Can you tell me when the symptoms started?",
-        "Have you taken any medication for this?",
-        "Based on what you've told me, this seems like a viral infection. Let me prescribe something for you.",
-      ];
-      const doctorMsg: Message = { id: (Date.now() + 1).toString(), sender: 'doctor', text: responses[Math.floor(Math.random() * responses.length)], timestamp: new Date() };
-      addMessage(doctorMsg);
-    }, 1500);
-  };
-
-  const handleDoctorsFound = (specialty: string) => {
-    const pool: Doctor[] = [
-      { id: 'd1', name: 'Dr. Sneha Reddy', specialization: specialty, rating: 4.8, experience: '9 years', avatar: '', verified: true, fee: 499, availability: 'Available now' },
-      { id: 'd2', name: 'Dr. Vikram Singh', specialization: specialty, rating: 4.7, experience: '11 years', avatar: '', verified: true, fee: 549, availability: 'Available in 10 min' },
-      { id: 'd3', name: 'Dr. Priya Sharma', specialization: specialty, rating: 4.9, experience: '12 years', avatar: '', verified: true, fee: 599, availability: 'Available now' },
-    ];
-    setAvailableDoctors(pool);
-    setCurrentScreen('available-doctors');
-  };
-
-  const handleSelectDoctor = (doctor: Doctor) => {
-    setCurrentDoctor(doctor);
-    addMessage({
-      id: '0',
-      sender: 'doctor',
-      text: `Hello! I'm ${doctor.name}. I've reviewed your concern. Can you tell me more about how you're feeling?`,
-      timestamp: new Date(),
-    });
-    setCurrentScreen('chat');
-  };
 
   const renderScreen = () => {
     switch (currentScreen) {
       // Auth flow
       case 'welcome': return <WelcomeScreen onContinue={() => setCurrentScreen('auth-choice')} onGoogleContinue={() => setCurrentScreen('auth-choice')} />;
       case 'auth-choice': return <AuthChoiceScreen onRegister={() => setCurrentScreen('phone-entry')} onLogin={() => setCurrentScreen('login')} onBack={() => setCurrentScreen('welcome')} />;
-      case 'phone-entry': return <PhoneEntryScreen onContinue={(p) => { setPhone(p); setCurrentScreen('otp'); }} onBack={() => setCurrentScreen('auth-choice')} />;
-      case 'otp': return <OTPScreen phone={phone} onVerify={() => setCurrentScreen('profile')} onBack={() => setCurrentScreen('phone-entry')} />;
-      case 'profile': return <ProfileScreen phone={phone} onComplete={(profile) => { setUser(profile); setCurrentScreen('location-access'); }} onBack={() => setCurrentScreen('otp')} />;
+      case 'phone-entry': return <PhoneEntryScreen onContinue={async (p, e, pw) => {
+        setPhone(p); setRegEmail(e); setRegPassword(pw);
+        const { registerAndSendVerification } = await import('@/services/auth');
+        const { user, error } = await registerAndSendVerification(e, pw);
+        if (error) throw new Error(error);
+        setCurrentScreen('otp');
+      }} onBack={() => setCurrentScreen('auth-choice')} />;
+      case 'otp': return <OTPScreen email={regEmail} onVerify={() => setCurrentScreen('profile')} onBack={() => setCurrentScreen('phone-entry')} />;
+      case 'profile': return <ProfileScreen phone={phone} email={regEmail} password={regPassword} onComplete={(profile) => { setUser(profile); setCurrentScreen('location-access'); }} onBack={() => setCurrentScreen('otp')} />;
       case 'location-access': return <LocationAccessScreen onGranted={(loc) => { setUserLocation(loc); setUser({ ...user, location: loc }); setCurrentScreen('home'); }} onSkip={() => setCurrentScreen('home')} />;
-      case 'login': return <LoginScreen onLogin={() => setCurrentScreen('location-access')} onBack={() => setCurrentScreen('auth-choice')} />;
+      case 'login': return <LoginScreen onLogin={(p) => { setUser({ name: p.name, age: p.age ?? '', gender: (p.gender as any) ?? '', phone: p.phone ?? '' }); setCurrentScreen('location-access'); }} onForgotPassword={() => setCurrentScreen('forgot-password')} onBack={() => setCurrentScreen('auth-choice')} />;
+      case 'forgot-password': return <ForgotPasswordScreen onBack={() => setCurrentScreen('login')} onSuccess={() => setCurrentScreen('login')} />;
 
       // Main app
-      case 'home': return <HomeScreen user={user} consultations={consultations} walletBalance={walletBalance} onRecharge={(amt) => setWalletBalance(walletBalance + amt)} onConsultNow={() => setCurrentScreen('symptoms')} onBookDoctor={() => setCurrentScreen('consultation-type')} onProfile={() => setCurrentScreen('user-profile')} onNotifications={() => {}} onConsultAgain={() => setCurrentScreen('consult-again')} onBookAppointment={() => setCurrentScreen('select-specialty')} onReferEarn={() => setCurrentScreen('user-profile')} onHelpCentre={() => setCurrentScreen('user-profile')} onRecords={() => setCurrentScreen('records')} />;
+      case 'home': return <HomeScreen user={user} consultations={consultations} walletBalance={walletBalance} onRecharge={handleRecharge} onConsultNow={() => setCurrentScreen('symptoms')} onBookDoctor={() => setCurrentScreen('consultation-type')} onProfile={() => setCurrentScreen('user-profile')} onNotifications={() => setCurrentScreen('user-notifications')} onConsultAgain={() => setCurrentScreen('consult-again')} onBookAppointment={() => setCurrentScreen('select-specialty')} onReferEarn={() => setCurrentScreen('user-profile')} onHelpCentre={() => setCurrentScreen('user-profile')} onRecords={() => setCurrentScreen('records')} />;
 
       // Consult Now flow
-      case 'symptoms': return <SymptomsScreen onSubmit={(symptoms) => { setSelectedSymptoms(symptoms); setSearchedSpecialty(symptoms[0] || 'General Physician'); setCurrentScreen('matching'); }} onBack={() => setCurrentScreen('home')} />;
-      case 'matching': return <MatchingScreen symptoms={selectedSymptoms} onMatched={() => handleDoctorsFound(searchedSpecialty || 'General Physician')} onCancel={() => setCurrentScreen('home')} />;
-      case 'available-doctors': return <AvailableDoctorsScreen specialty={searchedSpecialty} doctors={availableDoctors} walletBalance={walletBalance} onRecharge={(amt) => setWalletBalance(walletBalance + amt)} onSelectDoctor={handleSelectDoctor} onBack={() => setCurrentScreen('symptoms')} />;
-      case 'chat': return <ChatScreen doctor={currentDoctor || sampleDoctor} messages={messages} consultationFee={currentDoctor?.fee ?? 0} onSendMessage={handleSendMessage} onEndSession={() => { setCurrentPrescription(samplePrescription); setCurrentScreen('prescription'); }} onBack={() => { setCurrentPrescription(samplePrescription); setCurrentScreen('prescription'); }} currentPrescription={currentPrescription} onDownloadPrescription={() => {}} />;
-      case 'prescription': return <PrescriptionScreen prescription={currentPrescription || samplePrescription} onConsultAgain={() => setCurrentScreen('symptoms')} onBookSameDoctor={() => setCurrentScreen('symptoms')} onGoHome={() => setCurrentScreen('home')} onOrderMedicines={() => setCurrentScreen('pharmacy-selection')} />;
+      case 'symptoms': return <SymptomsScreen onSubmit={(symptoms, desc, reportUrl, mode) => {
+        setSelectedSymptoms(symptoms);
+        setSearchedSpecialty(symptoms[0] || 'General Physician');
+        setSymptomData(prev => ({ ...prev, description: desc ?? '', reportUrl }));
+        setConsultMode(mode ?? 'instant');
+        setCurrentScreen(mode === 'available' ? 'available-doctors' : 'matching');
+      }} onBack={() => setCurrentScreen('home')} />;
+      case 'matching': return <MatchingScreen symptoms={selectedSymptoms} description={symptomData.description} reportUrl={symptomData.reportUrl} consultMode={consultMode} onMatched={async (reqId, doctorId, sessionData) => {
+        setConsultRequestId(reqId);
+        setChatSessionData(sessionData);
+        const { data: priceRow } = await supabase.from('admin_pricing').select('value').eq('key', 'instant_chat_price').single();
+        setChatFee(Number(priceRow?.value) || 99);
+        const { data: doc } = await supabase.from('doctors')
+          .select('firebase_uid, full_name, specialization, selfie_url, experience_years')
+          .eq('firebase_uid', doctorId).maybeSingle();
+        if (doc) {
+          setCurrentDoctor({ id: doc.firebase_uid, name: doc.full_name, specialization: doc.specialization, avatar: doc.selfie_url ?? '', rating: 4.8, experience: `${doc.experience_years ?? 0} years`, verified: true, fee: 0, availability: 'Available now', firebase_uid: doc.firebase_uid, full_name: doc.full_name, selfie_url: doc.selfie_url } as any);
+          setCurrentScreen('chat');
+        } else {
+          setCurrentScreen('available-doctors');
+        }
+      }} onCancel={() => setCurrentScreen('home')} onBrowseDoctors={(reqId) => { setConsultRequestId(reqId); setCurrentScreen('available-doctors'); }} />;
+      case 'available-doctors': return <AvailableDoctorsScreen specialty={searchedSpecialty} description={symptomData.description} requestId={consultRequestId ?? undefined} walletBalance={walletBalance} onRecharge={handleRecharge} onSelectDoctor={async (doctor, callType) => {
+        // Fetch the actual fee stored in the consultation_request
+        const { data: reqRow } = await supabase.from('consultation_requests')
+          .select('fee').eq('doctor_id', doctor.firebase_uid).eq('status', 'accepted').order('created_at', { ascending: false }).limit(1).single();
+        setChatFee(Number(reqRow?.fee) || 0);
+        const chatDoctor = {
+          id: doctor.firebase_uid ?? doctor.id,
+          name: doctor.full_name ?? doctor.name,
+          specialization: doctor.specialization,
+          avatar: doctor.selfie_url ?? doctor.avatar ?? '',
+          rating: 4.8,
+          experience: `${doctor.experience_years ?? 0} years`,
+          verified: true, fee: 0,
+          availability: 'Available now',
+          firebase_uid: doctor.firebase_uid,
+          full_name: doctor.full_name,
+          selfie_url: doctor.selfie_url,
+        };
+        setCurrentDoctor(chatDoctor as any);
+        setCurrentScreen('chat');
+      }} onBack={() => setCurrentScreen(consultMode === 'available' ? 'symptoms' : 'matching')} />;
+      case 'chat': return currentDoctor ? <ChatScreen doctor={currentDoctor} sessionData={chatSessionData ?? undefined} consultationId={consultRequestId ?? undefined} consultationFee={chatFee} bonusMinutes={bonusMinutesForChat} onEndSession={(rxId?: string) => { if (rxId) setChatRxId(rxId); setCurrentScreen('prescription'); }} onBack={() => setCurrentScreen('home')} onDownloadPrescription={() => {}} /> : null;
+      case 'prescription': return <PrescriptionScreen rxId={chatRxId} prescription={currentPrescription ?? null as any} walletBalance={walletBalance} onRecharge={handleRecharge} onConsultAgain={() => setCurrentScreen('symptoms')} onBookSameDoctor={() => setCurrentScreen('symptoms')} onGoHome={() => setCurrentScreen('home')} onOrderMedicines={() => setCurrentScreen('pharmacy-selection')} onSelectDoctor={async (doctor, callType) => {
+        // Clear old session data so ChatScreen starts fresh
+        setChatSessionData(null);
+        setConsultRequestId(null);
+        setChatFee(0);
+
+        const chatDoctor = {
+          id: doctor.firebase_uid ?? doctor.id,
+          name: doctor.full_name ?? doctor.name,
+          specialization: doctor.specialization,
+          avatar: doctor.selfie_url ?? '',
+          rating: 4.8,
+          experience: `${doctor.experience_years ?? 0} years`,
+          verified: true, fee: 0, availability: 'Available now',
+          firebase_uid: doctor.firebase_uid, full_name: doctor.full_name, selfie_url: doctor.selfie_url,
+        };
+        setCurrentDoctor(chatDoctor as any);
+        setSearchedSpecialty(doctor.specialization ?? '');
+
+        // Fetch fee for this doctor
+        const { data: priceRow } = await supabase.from('doctor_pricing')
+          .select('chat_price').eq('doctor_id', doctor.firebase_uid ?? doctor.id).maybeSingle();
+        const fee = Number(priceRow?.chat_price) || 299;
+        setChatFee(fee);
+
+        // Create a fresh consultation_request — doctor will get notified and accept
+        const { getCurrentUser } = await import('@/services/auth');
+        const u = getCurrentUser();
+        if (!u) return;
+        const { data: userRow } = await supabase.from('users').select('name').eq('id', u.uid).maybeSingle();
+        const patientName = userRow?.name || u.email || 'Patient';
+
+        const { data: req } = await supabase.from('consultation_requests').insert({
+          patient_id: u.uid,
+          patient_name: patientName,
+          specialty: doctor.specialization ?? '',
+          status: 'searching',
+          doctor_id: doctor.firebase_uid ?? doctor.id,
+          call_type: callType,
+          fee,
+          consult_mode: 'available',
+        }).select('id').single();
+
+        if (req?.id) {
+          setConsultRequestId(req.id);
+        }
+        // Navigate to chat — ChatScreen will find/wait for the new session doctor creates
+        setCurrentScreen('chat');
+      }} />;
 
       // Other main screens
       case 'records': return <RecordsScreen onBack={() => setCurrentScreen('home')} onViewPrescription={() => setCurrentScreen('prescription')} />;
-      case 'user-profile': return <UserProfileScreen user={user} onBack={() => setCurrentScreen('home')} onEditProfile={() => setCurrentScreen('profile')} onLogout={() => { localStorage.removeItem('mc_screen'); localStorage.removeItem('mc_user'); localStorage.removeItem('mc_wallet'); setCurrentScreen('welcome'); }} onDoctorRegister={() => setCurrentScreen('doctor-welcome')} />;
+      case 'user-profile': return <UserProfileScreen user={user} onBack={() => setCurrentScreen('home')} onEditProfile={() => setCurrentScreen('profile')} onLogout={async () => { const { logout } = await import('@/services/auth'); await logout(); localStorage.removeItem('mc_screen'); localStorage.removeItem('mc_user'); localStorage.removeItem('mc_wallet'); setCurrentScreen('welcome'); }} onDoctorRegister={() => setCurrentScreen('doctor-welcome')} />;
+      case 'user-notifications': return <UserNotificationsScreen onBack={() => setCurrentScreen('home')} />;
       case 'payment': return <PaymentScreen consultationFee={299} onPaymentComplete={() => setCurrentScreen('symptoms')} onBack={() => setCurrentScreen('home')} />;
-      case 'pharmacy-selection': return <PharmacySelectionScreen prescription={currentPrescription || samplePrescription} onSendToPharmacy={() => setCurrentScreen('order-confirmation')} onBack={() => setCurrentScreen('prescription')} />;
-      case 'order-confirmation': return <OrderConfirmationScreen prescription={currentPrescription || samplePrescription} deliveryAddress="123, Green Valley Apartments, Sector 21, Gurugram, Haryana - 122001" onConfirm={() => setCurrentScreen('order-processing')} onCancel={() => setCurrentScreen('pharmacy-selection')} />;
+      case 'pharmacy-selection': return <PharmacySelectionScreen prescription={currentPrescription!} onSendToPharmacy={() => setCurrentScreen('order-confirmation')} onBack={() => setCurrentScreen('prescription')} />;
+      case 'order-confirmation': return <OrderConfirmationScreen prescription={currentPrescription!} deliveryAddress="123, Green Valley Apartments, Sector 21, Gurugram, Haryana - 122001" onConfirm={() => setCurrentScreen('order-processing')} onCancel={() => setCurrentScreen('pharmacy-selection')} />;
       case 'order-processing': return <OrderProcessingScreen onProceedToPayment={() => setCurrentScreen('price-payment')} onContactSupport={() => {}} />;
-      case 'price-payment': return <PricePaymentScreen medicines={(currentPrescription || samplePrescription).medicines} onPaymentComplete={() => setCurrentScreen('order-tracking')} onBack={() => setCurrentScreen('order-processing')} />;
+      case 'price-payment': return <PricePaymentScreen medicines={currentPrescription?.medicines ?? []} onPaymentComplete={() => setCurrentScreen('order-tracking')} onBack={() => setCurrentScreen('order-processing')} />;
       case 'order-tracking': return <OrderTrackingScreen orderId="#MOM2024001234" onContactPharmacy={() => {}} onContactSupport={() => {}} onOrderDelivered={() => setCurrentScreen('order-completion')} />;
       case 'order-completion': return <OrderCompletionScreen orderId="#MOM2024001234" onRateExperience={() => {}} onConsultAgain={() => setCurrentScreen('symptoms')} onGoHome={() => setCurrentScreen('home')} />;
 
@@ -229,21 +246,54 @@ function AppContent() {
       // Book a Doctor Flow
       case 'consultation-type': return <ConsultationTypeScreen onSelect={(type) => { setConsultationType(type); setCurrentScreen('select-specialty'); }} onBack={() => setCurrentScreen('home')} />;
       case 'select-specialty': return <SelectSpecialtyScreen onSelect={(specialty) => { setSelectedSpecialty(specialty); setCurrentScreen('symptom-description'); }} onBack={() => setCurrentScreen('consultation-type')} />;
-      case 'symptom-description': return <SymptomDescriptionScreen specialty={selectedSpecialty} onSubmit={() => setCurrentScreen(consultationType === 'hospital' ? 'select-hospital' : 'home-visit-availability')} onBack={() => setCurrentScreen('select-specialty')} />;
+      case 'symptom-description': return <SymptomDescriptionScreen specialty={selectedSpecialty} onSubmit={(data) => { setSymptomData({ description: data.description, symptoms: data.symptoms, reportUrl: data.reportUrl }); setCurrentScreen(consultationType === 'hospital' ? 'select-hospital' : 'home-visit-availability'); }} onBack={() => setCurrentScreen('select-specialty')} />;
 
       // Hospital Flow
-      case 'select-hospital': return <SelectHospitalScreen walletBalance={walletBalance} onRecharge={(amt) => setWalletBalance(walletBalance + amt)} onSelect={(hospital) => { setSelectedHospital(hospital); setCurrentScreen('select-doctor'); }} onBack={() => setCurrentScreen('symptom-description')} />;
+      case 'select-hospital': return <SelectHospitalScreen walletBalance={walletBalance} onRecharge={handleRecharge} onSelect={(doctor) => { setSelectedHospital(doctor as any); setSelectedDoctorWithFee(doctor as any); setCurrentScreen('select-time-slot'); }} onBack={() => setCurrentScreen('symptom-description')} />;
       case 'select-doctor': return <SelectDoctorScreen hospital={selectedHospital!} onSelect={(doctor) => { setSelectedDoctorWithFee(doctor); setCurrentScreen('select-time-slot'); }} onBack={() => setCurrentScreen('select-hospital')} />;
-      case 'select-time-slot': return <SelectTimeSlotScreen doctor={selectedDoctorWithFee!} onSelect={(date, slot) => { setSelectedDate(date); setSelectedTimeSlot(slot); setCurrentScreen('appointment-summary'); }} onBack={() => setCurrentScreen('select-doctor')} />;
-      case 'appointment-summary': return <AppointmentSummaryScreen doctor={selectedDoctorWithFee!} hospital={selectedHospital!} date={selectedDate} timeSlot={selectedTimeSlot} onConfirm={() => {
+      case 'select-time-slot': return <SelectTimeSlotScreen doctor={(selectedDoctorWithFee as any) ?? (selectedHospital as any)} onSelect={(date, slot) => { setSelectedDate(date); setSelectedTimeSlot(slot); setCurrentScreen('appointment-summary'); }} onBack={() => setCurrentScreen('select-hospital')} />;
+      case 'appointment-summary': return <AppointmentSummaryScreen doctor={selectedDoctorWithFee ?? (selectedHospital as any)} hospital={selectedHospital!} date={selectedDate} timeSlot={selectedTimeSlot} walletBalance={walletBalance} onRecharge={handleRecharge} onConfirm={async (paymentMethod) => {
+        const { getCurrentUser } = await import('@/services/auth');
+        const u = getCurrentUser();
+        const opdDoc = selectedHospital as any;
+        const fee = (selectedDoctorWithFee as any)?.fee ?? (opdDoc as any)?.consult_fee ?? 300;
+
+        // Get patient name from Supabase (same source BookingsScreen uses)
+        let patientName = user?.name ?? 'Patient';
+        let patientPhone = user?.phone ?? null;
+        if (u) {
+          const { data: dbUser } = await supabase.from('users').select('name, phone').eq('id', u.uid).maybeSingle();
+          if (dbUser?.name) patientName = dbUser.name;
+          if (dbUser?.phone) patientPhone = dbUser.phone;
+        }
+
+        // Deduct wallet only for online payment
+        if (paymentMethod === 'online') {
+          await deductWallet(fee);
+        }
+
+        await supabase.from('opd_appointments').insert({
+          doctor_id: opdDoc?.firebase_uid ?? opdDoc?.id ?? '',
+          patient_name: patientName,
+          patient_phone: patientPhone,
+          appointment_date: format(selectedDate, 'yyyy-MM-dd'),
+          time_slot: selectedTimeSlot,
+          fee,
+          payment_method: paymentMethod ?? 'online',
+          payment_status: paymentMethod === 'online' ? 'paid' : 'pending',
+          status: 'pending',
+          symptoms: symptomData.symptoms,
+          description: symptomData.description,
+          report_url: symptomData.reportUrl ?? null,
+        });
         const newApt: Appointment = {
           id: Date.now().toString(),
-          doctor: selectedDoctorWithFee!,
+          doctor: selectedDoctorWithFee ?? (selectedHospital as any),
           hospital: selectedHospital!,
           type: 'hospital',
           date: selectedDate,
           timeSlot: selectedTimeSlot,
-          fee: selectedDoctorWithFee?.fee ?? 0,
+          fee,
           status: 'confirmed',
         };
         addAppointment(newApt);
@@ -275,7 +325,7 @@ function AppContent() {
 
       // Quick Actions
       case 'consult-again': return <ConsultAgainScreen consultations={consultations} onConsultAgain={() => setCurrentScreen('chat')} onBack={() => setCurrentScreen('home')} />;
-      case 'prescriptions-list': return <PrescriptionsListScreen prescriptions={[samplePrescription]} onViewPrescription={() => setCurrentScreen('prescription')} onBack={() => setCurrentScreen('home')} />;
+      case 'prescriptions-list': return <PrescriptionsListScreen prescriptions={currentPrescription ? [currentPrescription] : []} onViewPrescription={() => setCurrentScreen('prescription')} onBack={() => setCurrentScreen('home')} />;
       case 'upload-report': return <UploadReportScreen onUpload={() => setCurrentScreen('records')} onBack={() => setCurrentScreen('home')} />;
       case 'family-members': return <FamilyMembersScreen members={[]} onAddMember={() => {}} onBack={() => setCurrentScreen('home')} />;
 

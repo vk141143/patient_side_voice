@@ -1,11 +1,12 @@
 import { Button } from '@/components/ui/button';
-import { ArrowLeft, Camera, FileText, X } from 'lucide-react';
+import { ArrowLeft, Camera, FileText, X, Loader2 } from 'lucide-react';
 import { useState, useRef } from 'react';
 import { Specialty } from '@/types/app';
+import { supabase } from '@/lib/supabase';
 
 interface SymptomDescriptionScreenProps {
   specialty: Specialty;
-  onSubmit: (data: { description: string; symptoms: string[]; hasReport: boolean }) => void;
+  onSubmit: (data: { description: string; symptoms: string[]; hasReport: boolean; reportUrl?: string }) => void;
   onBack: () => void;
 }
 
@@ -22,7 +23,8 @@ const symptomsBySpecialty: Record<Specialty, string[]> = {
 export function SymptomDescriptionScreen({ specialty, onSubmit, onBack }: SymptomDescriptionScreenProps) {
   const [description, setDescription] = useState('');
   const [selectedSymptoms, setSelectedSymptoms] = useState<string[]>([]);
-  const [uploadedFile, setUploadedFile] = useState<{ name: string; type: string } | null>(null);
+  const [uploadedFile, setUploadedFile] = useState<{ name: string; type: string; file: File } | null>(null);
+  const [uploading, setUploading] = useState(false);
   const [showUploadMenu, setShowUploadMenu] = useState(false);
   const photoRef = useRef<HTMLInputElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -37,13 +39,29 @@ export function SymptomDescriptionScreen({ specialty, onSubmit, onBack }: Sympto
 
   const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) setUploadedFile({ name: file.name, type: file.type });
+    if (file) {
+      if (file.size > 5 * 1024 * 1024) { alert('File must be less than 5MB'); return; }
+      setUploadedFile({ name: file.name, type: file.type, file });
+    }
     setShowUploadMenu(false);
     e.target.value = '';
   };
 
-  const handleSubmit = () => {
-    onSubmit({ description, symptoms: selectedSymptoms, hasReport: !!uploadedFile });
+  const handleSubmit = async () => {
+    setUploading(true);
+    let reportUrl: string | undefined;
+    if (uploadedFile?.file) {
+      const path = `${Date.now()}_${uploadedFile.name.replace(/\s+/g, '_')}`;
+      const { data: up } = await supabase.storage
+        .from('patient-reports')
+        .upload(path, uploadedFile.file, { upsert: true });
+      if (up) {
+        const { data: urlData } = supabase.storage.from('patient-reports').getPublicUrl(up.path);
+        reportUrl = urlData.publicUrl;
+      }
+    }
+    setUploading(false);
+    onSubmit({ description, symptoms: selectedSymptoms, hasReport: !!uploadedFile, reportUrl });
   };
 
   return (
@@ -157,10 +175,10 @@ export function SymptomDescriptionScreen({ specialty, onSubmit, onBack }: Sympto
           variant="default"
           size="xl"
           className="w-full"
-          disabled={!description && selectedSymptoms.length === 0}
+          disabled={(!description && selectedSymptoms.length === 0) || uploading}
           onClick={handleSubmit}
         >
-          Continue
+          {uploading ? <><Loader2 className="w-4 h-4 animate-spin" /> Uploading...</> : 'Continue'}
         </Button>
       </div>
     </div>

@@ -7,6 +7,7 @@ export type AppScreen =
   | 'profile'
   | 'location-access'
   | 'available-doctors'
+  | 'forgot-password'
   | 'home'
   | 'symptoms'
   | 'matching'

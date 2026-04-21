@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { MapPin, X } from 'lucide-react';
+import { getCurrentUser } from '@/services/auth';
+import { supabase } from '@/lib/supabase';
 
 interface LocationAccessScreenProps {
   onGranted: (location: { lat: number; lng: number; city?: string }) => void;
@@ -28,6 +30,15 @@ export function LocationAccessScreen({ onGranted, onSkip }: LocationAccessScreen
           // city remains undefined — coords still captured
         }
         setLoading(false);
+        // Save location to Supabase if user is logged in
+        const firebaseUser = getCurrentUser();
+        if (firebaseUser) {
+          await supabase.from('users').update({
+            location_lat: lat,
+            location_lng: lng,
+            location_city: city ?? null,
+          }).eq('id', firebaseUser.uid);
+        }
         onGranted({ lat, lng, city });
       },
       () => {

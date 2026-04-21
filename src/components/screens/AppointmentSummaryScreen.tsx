@@ -1,15 +1,17 @@
 import { Button } from '@/components/ui/button';
-import { ArrowLeft, MapPin, Calendar, Clock, CreditCard, BadgeCheck } from 'lucide-react';
-import { Doctor, Hospital } from '@/types/app';
+import { ArrowLeft, MapPin, Calendar, Clock, CreditCard, BadgeCheck, AlertCircle, Wallet } from 'lucide-react';
 import { format } from 'date-fns';
 import { useState } from 'react';
+import { WalletRechargeModal } from '@/components/WalletRechargeModal';
 
 interface AppointmentSummaryScreenProps {
-  doctor: Doctor & { fee: number };
-  hospital: Hospital;
+  doctor: any;
+  hospital: any;
   date: Date;
   timeSlot: string;
-  onConfirm: (paymentMethod: 'online' | 'hospital') => void;
+  walletBalance?: number;
+  onRecharge?: (amount: number) => void;
+  onConfirm: (paymentMethod?: 'online' | 'hospital') => void;
   onBack: () => void;
 }
 
@@ -17,11 +19,16 @@ export function AppointmentSummaryScreen({
   doctor, 
   hospital, 
   date, 
-  timeSlot, 
+  timeSlot,
+  walletBalance = 0,
+  onRecharge,
   onConfirm, 
   onBack 
 }: AppointmentSummaryScreenProps) {
   const [paymentMethod, setPaymentMethod] = useState<'online' | 'hospital'>('online');
+  const [showWallet, setShowWallet] = useState(false);
+  const fee = doctor?.fee ?? doctor?.consult_fee ?? 300;
+  const insufficientBalance = paymentMethod === 'online' && walletBalance < fee;
 
   return (
     <div className="flex flex-col min-h-screen bg-background">
@@ -38,17 +45,15 @@ export function AppointmentSummaryScreen({
         {/* Doctor Card */}
         <div className="bg-card rounded-2xl p-4 border border-border">
           <div className="flex items-center gap-3">
-            <img 
-              src={doctor.avatar} 
-              alt={doctor.name}
-              className="w-14 h-14 rounded-full object-cover"
-            />
+            <div className="w-14 h-14 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
+              <span className="text-xl font-bold text-primary">{(doctor?.name || doctor?.full_name || 'D').charAt(0)}</span>
+            </div>
             <div className="flex-1">
               <div className="flex items-center gap-2">
-                <h3 className="font-semibold text-foreground">{doctor.name}</h3>
-                {doctor.verified && <BadgeCheck className="w-4 h-4 text-primary" />}
+                <h3 className="font-semibold text-foreground">{doctor?.name || doctor?.full_name}</h3>
+                {doctor?.verified && <BadgeCheck className="w-4 h-4 text-primary" />}
               </div>
-              <p className="text-sm text-muted-foreground">{doctor.specialization}</p>
+              <p className="text-sm text-muted-foreground">{doctor?.specialization}</p>
             </div>
           </div>
         </div>
@@ -60,9 +65,9 @@ export function AppointmentSummaryScreen({
               <MapPin className="w-5 h-5 text-primary" />
             </div>
             <div>
-              <h3 className="font-semibold text-foreground">{hospital.name}</h3>
-              <p className="text-sm text-muted-foreground">{hospital.address}</p>
-              <p className="text-xs text-primary mt-1">{hospital.distance} away</p>
+              <h3 className="font-semibold text-foreground">{hospital?.name || doctor?.hospital_name || '—'}</h3>
+              <p className="text-sm text-muted-foreground">{hospital?.address || doctor?.clinic_address || ''}</p>
+              {hospital?.distance && <p className="text-xs text-primary mt-1">{hospital.distance} away</p>}
             </div>
           </div>
         </div>
@@ -97,7 +102,7 @@ export function AppointmentSummaryScreen({
           <div className="space-y-2">
             <div className="flex justify-between">
               <span className="text-muted-foreground">Consultation Fee</span>
-              <span className="text-foreground">₹{doctor.fee}</span>
+              <span className="text-foreground">₹{doctor?.fee ?? doctor?.consult_fee ?? 300}</span>
             </div>
             <div className="flex justify-between">
               <span className="text-muted-foreground">Booking Fee</span>
@@ -106,7 +111,7 @@ export function AppointmentSummaryScreen({
             <div className="border-t border-border pt-2 mt-2">
               <div className="flex justify-between">
                 <span className="font-semibold text-foreground">Total</span>
-                <span className="font-bold text-primary text-lg">₹{doctor.fee}</span>
+                <span className="font-bold text-primary text-lg">₹{doctor?.fee ?? doctor?.consult_fee ?? 300}</span>
               </div>
             </div>
           </div>
@@ -164,16 +169,32 @@ export function AppointmentSummaryScreen({
       </div>
 
       {/* CTA */}
-      <div className="p-5 pb-8">
-        <Button
-          variant="default"
-          size="xl"
-          className="w-full"
-          onClick={() => onConfirm(paymentMethod)}
-        >
-          Confirm Booking • ₹{doctor.fee}
+      <div className="p-5 pb-8 space-y-3">
+        {insufficientBalance && (
+          <div className="bg-destructive/10 border border-destructive/20 rounded-xl px-4 py-3 space-y-2">
+            <div className="flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 text-destructive flex-shrink-0" />
+              <p className="text-sm text-destructive font-medium">
+                Insufficient balance. Need ₹{fee - walletBalance} more.
+              </p>
+            </div>
+            <button onClick={() => setShowWallet(true)}
+              className="w-full flex items-center justify-center gap-2 py-2 rounded-xl bg-primary/10 text-primary text-sm font-semibold hover:bg-primary/20 transition-colors">
+              <Wallet className="w-4 h-4" />
+              Recharge Wallet
+            </button>
+          </div>
+        )}
+        <Button variant="default" size="xl" className="w-full"
+          disabled={insufficientBalance}
+          onClick={() => onConfirm(paymentMethod)}>
+          Confirm Booking • ₹{fee}
         </Button>
       </div>
+
+      {showWallet && onRecharge && (
+        <WalletRechargeModal currentBalance={walletBalance} onRecharge={onRecharge} onClose={() => setShowWallet(false)} />
+      )}
     </div>
   );
 }

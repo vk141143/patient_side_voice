@@ -3,8 +3,10 @@ import { Bell, Wallet, Clock, Users, Star, MessageSquare, Heart, ChevronRight, C
 import { UserProfile, Consultation } from '@/types/app';
 import doctorFemale from '@/assets/doctor-female.jpg';
 import doctorMale from '@/assets/doctor-male.jpg';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { WalletRechargeModal } from '@/components/WalletRechargeModal';
+import { supabase } from '@/lib/supabase';
+import { getCurrentUser } from '@/services/auth';
 
 interface HomeScreenProps {
   user: UserProfile;
@@ -28,6 +30,37 @@ export function HomeScreen({
   onBookAppointment, onReferEarn, onHelpCentre, onRecords,
 }: HomeScreenProps) {
   const [showWallet, setShowWallet] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
+
+  useEffect(() => {
+    const firebaseUser = getCurrentUser();
+    if (!firebaseUser) return;
+    const uid = firebaseUser.uid;
+
+    const fetchUnread = () => {
+      const stored = localStorage.getItem(`notif_read_${uid}`);
+      const readIds: string[] = stored ? JSON.parse(stored) : [];
+      supabase
+        .from('admin_notifications')
+        .select('id')
+        .or(`target_id.eq.${uid},target_type.eq.all_users`)
+        .then(({ data }) => {
+          const all = (data ?? []).map(r => r.id);
+          setUnreadCount(all.filter(id => !readIds.includes(id)).length);
+        });
+    };
+
+    fetchUnread();
+
+    const sub = supabase
+      .channel(`home_notif_${uid}`)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'admin_notifications' },
+        () => fetchUnread()
+      )
+      .subscribe();
+
+    return () => { supabase.removeChannel(sub); };
+  }, []);
   const quickActions = [
     { icon: CalendarCheck, label: 'Book Appointment', color: 'text-primary',     action: onBookAppointment },
     { icon: Gift,          label: 'Refer & Earn',     color: 'text-accent',      action: onReferEarn },
@@ -49,9 +82,14 @@ export function HomeScreen({
           <div className="flex gap-2">
             <button
               onClick={onNotifications}
-              className="w-11 h-11 rounded-full bg-primary-foreground/10 backdrop-blur flex items-center justify-center"
+              className="relative p-2 rounded-full bg-primary-foreground/10 backdrop-blur"
             >
               <Bell className="w-5 h-5 text-primary-foreground" />
+              {unreadCount > 0 && (
+                <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center px-1">
+                  {unreadCount > 99 ? '99+' : unreadCount}
+                </span>
+              )}
             </button>
             <button
               onClick={() => setShowWallet(true)}

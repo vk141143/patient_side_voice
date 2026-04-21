@@ -1,8 +1,11 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
-import { ArrowLeft, User, Phone, Calendar, Edit2, Moon, Sun, Bell, Shield, HelpCircle, LogOut, ChevronRight, Users, X, Check, Copy, Share2, MessageCircle, Mail, ChevronDown, ChevronUp, Star, Plus } from 'lucide-react';
+import { ArrowLeft, User, Phone, Calendar, Edit2, Moon, Sun, Bell, Shield, HelpCircle, LogOut, ChevronRight, Users, X, Check, Copy, Share2, MessageCircle, Mail, ChevronDown, ChevronUp, Star, Plus, Loader2, Clock, FileText, Info, AlertCircle, Tag } from 'lucide-react';
 import { UserProfile } from '@/types/app';
 import { useTheme } from '@/context/ThemeContext';
+import { supabase } from '@/lib/supabase';
+import { onAuthChange } from '@/services/auth';
+import { getCurrentUser } from '@/services/auth';
 
 interface UserProfileScreenProps {
   user: UserProfile;
@@ -17,19 +20,47 @@ function EditProfileModal({ user, onSave, onClose }: { user: UserProfile; onSave
   const [name, setName] = useState(user.name);
   const [age, setAge] = useState(user.age);
   const [gender, setGender] = useState(user.gender);
+  const [phone, setPhone] = useState(user.phone ?? '');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [saved, setSaved] = useState(false);
+
+  const handleSave = async () => {
+    setError('');
+    setLoading(true);
+    try {
+      const { getCurrentUser, updateUserProfile } = await import('@/services/auth');
+      const firebaseUser = getCurrentUser();
+      if (firebaseUser) {
+        const { error: err } = await updateUserProfile(firebaseUser.uid, { name, age, gender, phone });
+        if (err) { setError(err); setLoading(false); return; }
+      }
+      onSave({ name, age, gender, phone });
+      setSaved(true);
+      setTimeout(onClose, 1000);
+    } catch {
+      setError('Failed to save. Please try again.');
+    }
+    setLoading(false);
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative w-full max-w-md bg-background rounded-t-3xl px-6 pt-4 pb-10">
-        <div className="w-10 h-1 rounded-full bg-border mx-auto mb-5" />
-        <div className="flex items-center justify-between mb-5">
+      <div className="relative w-full max-w-md bg-background rounded-t-3xl flex flex-col" style={{ height: '70vh' }}>
+        <div className="w-10 h-1 rounded-full bg-border mx-auto mt-3 mb-1 flex-shrink-0" />
+        <div className="flex items-center justify-between px-6 py-4 border-b border-border flex-shrink-0">
           <h2 className="text-lg font-bold text-foreground">Edit Profile</h2>
           <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-secondary">
             <X className="w-4 h-4 text-muted-foreground" />
           </button>
         </div>
-        <div className="space-y-4">
+        <div className="flex-1 overflow-y-auto min-h-0 px-6 py-4 space-y-4">
+          {error && (
+            <div className="bg-destructive/10 border border-destructive/20 rounded-xl px-4 py-2.5">
+              <p className="text-sm text-destructive">{error}</p>
+            </div>
+          )}
           <div>
             <label className="text-sm font-medium text-foreground mb-1.5 block">Full Name</label>
             <input value={name} onChange={e => setName(e.target.value)} className="w-full h-12 px-4 rounded-xl border border-border bg-card text-foreground outline-none focus:border-primary" />
@@ -49,10 +80,27 @@ function EditProfileModal({ user, onSave, onClose }: { user: UserProfile; onSave
               ))}
             </div>
           </div>
-          <Button variant="hero" size="xl" className="w-full mt-2" onClick={() => { onSave({ name, age, gender }); onClose(); }}>
-            <Check className="w-4 h-4" /> Save Changes
-          </Button>
+          <div>
+            <label className="text-sm font-medium text-foreground mb-1.5 block">Mobile Number</label>
+            <div className="flex gap-2">
+              <div className="h-12 px-3 flex items-center rounded-xl border border-border bg-card text-foreground font-medium text-sm">+91</div>
+              <input type="tel" value={phone.replace('+91 ', '')} onChange={e => setPhone('+91 ' + e.target.value.replace(/\D/g, '').slice(0, 10))}
+                placeholder="10-digit number" className="flex-1 h-12 px-4 rounded-xl border border-border bg-card text-foreground outline-none focus:border-primary" />
+            </div>
+          </div>
+
+          {/* Save button inside scroll area — always visible */}
+          <div className="pt-2 pb-4">
+            <Button variant="hero" size="xl" className="w-full" onClick={handleSave} disabled={loading || saved}>
+              {saved
+                ? <><Check className="w-4 h-4" /> Saved!</>
+                : loading
+                ? <><Loader2 className="w-4 h-4 animate-spin" /> Saving...</>
+                : <><Check className="w-4 h-4" /> Save Changes</>}
+            </Button>
+          </div>
         </div>
+        <div className="flex-shrink-0 px-6 pb-6 pt-3 border-t border-border bg-background" />
       </div>
     </div>
   );
@@ -60,36 +108,155 @@ function EditProfileModal({ user, onSave, onClose }: { user: UserProfile; onSave
 
 // ── Notifications Screen ────────────────────────────────────────────
 function NotificationsScreen({ onBack }: { onBack: () => void }) {
-  const [settings, setSettings] = useState({ appointments: true, offers: false, reminders: true, updates: false });
-  const toggle = (key: keyof typeof settings) => setSettings(p => ({ ...p, [key]: !p[key] }));
-  const items = [
-    { key: 'appointments' as const, label: 'Appointment Reminders', desc: 'Get notified before your appointments' },
-    { key: 'offers' as const, label: 'Offers & Promotions', desc: 'Discounts and special offers' },
-    { key: 'reminders' as const, label: 'Medication Reminders', desc: 'Reminders to take your medicines' },
-    { key: 'updates' as const, label: 'App Updates', desc: 'New features and improvements' },
-  ];
+  const [notifications, setNotifications] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [userId, setUserId] = useState<string | null>(null);
+  const [readIds, setReadIds] = useState<Set<string>>(new Set());
+  const [selected, setSelected] = useState<any | null>(null);
+
+  useEffect(() => {
+    const user = getCurrentUser();
+    if (!user) { setLoading(false); return; }
+    setUserId(user.uid);
+    const uid = user.uid;
+
+    // Load already-read IDs from localStorage
+    const stored = localStorage.getItem(`notif_read_${uid}`);
+    const initial: string[] = stored ? JSON.parse(stored) : [];
+    setReadIds(new Set(initial));
+
+    const fetchNotifs = async () => {
+      const { data } = await supabase
+        .from('admin_notifications')
+        .select('*')
+        .or(`target_id.eq.${uid},target_type.eq.all_users`)
+        .order('created_at', { ascending: false });
+      setNotifications(data ?? []);
+      setLoading(false);
+    };
+
+    fetchNotifs();
+
+    const sub = supabase.channel('user_notifs')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'admin_notifications' },
+        (payload) => {
+          const n = payload.new as any;
+          if (n.target_type === 'all_users' || n.target_id === uid) {
+            setNotifications(prev => [n, ...prev]);
+          }
+        })
+      .subscribe();
+
+    return () => { supabase.removeChannel(sub); };
+  }, []);
+
+  const markRead = (id: string) => {
+    setReadIds(prev => {
+      const next = new Set(prev).add(id);
+      if (userId) localStorage.setItem(`notif_read_${userId}`, JSON.stringify([...next]));
+      return next;
+    });
+  };
+
+  const handleOpen = (n: any) => {
+    setSelected(n);
+    markRead(n.id);
+  };
+
+  const isUnread = (n: any) => !readIds.has(n.id);
+
+  const typeIcon = (type: string) => {
+    const map: Record<string, any> = {
+      info:     { icon: Info,         color: 'text-blue-500',   bg: 'bg-blue-500/10' },
+      alert:    { icon: AlertCircle,  color: 'text-red-500',    bg: 'bg-red-500/10' },
+      promo:    { icon: Tag,          color: 'text-yellow-500', bg: 'bg-yellow-500/10' },
+      reminder: { icon: Clock,        color: 'text-orange-500', bg: 'bg-orange-500/10' },
+    };
+    const cfg = map[type] ?? map.info;
+    return (
+      <div className={`w-10 h-10 rounded-full ${cfg.bg} flex items-center justify-center flex-shrink-0`}>
+        <cfg.icon className={`w-5 h-5 ${cfg.color}`} />
+      </div>
+    );
+  };
+
+  const unreadCount = notifications.filter(n => isUnread(n)).length;
+
   return (
     <div className="flex flex-col min-h-screen bg-background">
       <div className="flex items-center gap-4 px-4 py-4 border-b border-border">
-        <button onClick={onBack} className="w-10 h-10 flex items-center justify-center rounded-full hover:bg-secondary"><ArrowLeft className="w-5 h-5 text-foreground" /></button>
+        <button onClick={onBack} className="w-10 h-10 flex items-center justify-center rounded-full hover:bg-secondary">
+          <ArrowLeft className="w-5 h-5 text-foreground" />
+        </button>
         <h1 className="text-lg font-semibold text-foreground">Notifications</h1>
+        {unreadCount > 0 && (
+          <span className="ml-auto bg-red-500 text-white text-xs font-bold px-2.5 py-1 rounded-full">
+            {unreadCount}
+          </span>
+        )}
       </div>
-      <div className="flex-1 px-5 py-5 space-y-3">
-        {items.map(item => (
-          <div key={item.key} className="flex items-center justify-between bg-card rounded-xl p-4 border border-border/50">
-            <div>
-              <p className="font-medium text-foreground">{item.label}</p>
-              <p className="text-xs text-muted-foreground mt-0.5">{item.desc}</p>
-            </div>
-            <button onClick={() => toggle(item.key)}
-              className={`w-12 h-6 rounded-full p-0.5 transition-colors ${settings[item.key] ? 'bg-primary' : 'bg-muted'}`}>
-              <div className={`w-5 h-5 rounded-full bg-white shadow-sm transition-transform ${settings[item.key] ? 'translate-x-6' : 'translate-x-0'}`} />
-            </button>
+
+      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
+        {loading ? (
+          <div className="flex items-center justify-center py-16">
+            <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
           </div>
+        ) : notifications.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-16 gap-3">
+            <div className="w-16 h-16 rounded-full bg-secondary flex items-center justify-center">
+              <Bell className="w-8 h-8 text-muted-foreground" />
+            </div>
+            <p className="font-medium text-foreground">No notifications yet</p>
+            <p className="text-sm text-muted-foreground">We'll notify you when something arrives</p>
+          </div>
+        ) : notifications.map(n => (
+          <button key={n.id} onClick={() => handleOpen(n)}
+            className={`w-full flex items-start gap-3 rounded-2xl p-4 border text-left transition-colors ${
+              isUnread(n) ? 'bg-primary/5 border-primary/20' : 'bg-card border-border/50'
+            }`}>
+            {typeIcon(n.type)}
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2">
+                <p className="font-semibold text-foreground text-sm truncate">{n.title}</p>
+                {isUnread(n) && <span className="w-2 h-2 rounded-full bg-red-500 flex-shrink-0" />}
+              </div>
+              <p className="text-sm text-muted-foreground mt-0.5 line-clamp-2">{n.message}</p>
+              <p className="text-xs text-muted-foreground mt-1">
+                {n.created_at ? new Date(n.created_at).toLocaleString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : ''}
+              </p>
+            </div>
+          </button>
         ))}
       </div>
+
+      {/* Notification Detail Popup */}
+      {selected && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center px-5">
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setSelected(null)} />
+          <div className="relative w-full max-w-sm bg-background rounded-2xl p-6 shadow-2xl space-y-4">
+            <div className="flex items-start gap-3">
+              {typeIcon(selected.type)}
+              <div className="flex-1">
+                <p className="font-bold text-foreground text-base">{selected.title}</p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  {selected.created_at ? new Date(selected.created_at).toLocaleString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : ''}
+                </p>
+              </div>
+              <button onClick={() => setSelected(null)} className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-secondary flex-shrink-0">
+                <X className="w-4 h-4 text-muted-foreground" />
+              </button>
+            </div>
+            <p className="text-sm text-foreground leading-relaxed">{selected.message}</p>
+          </div>
+        </div>
+      )}
     </div>
   );
+}
+
+// ── Notifications Screen (exported for direct navigation) ──────────
+export function UserNotificationsScreen({ onBack }: { onBack: () => void }) {
+  return <NotificationsScreen onBack={onBack} />;
 }
 
 // ── Help & Support Screen ───────────────────────────────────────────
@@ -99,19 +266,58 @@ function HelpSupportScreen({ onBack }: { onBack: () => void }) {
   const [fbTitle, setFbTitle] = useState('');
   const [fbDesc, setFbDesc] = useState('');
   const [fbPhotos, setFbPhotos] = useState<string[]>([]);
+  const [fbPhotoFiles, setFbPhotoFiles] = useState<File[]>([]);
   const [fbDocs, setFbDocs] = useState<string[]>([]);
+  const [fbDocFiles, setFbDocFiles] = useState<File[]>([]);
   const [submitted, setSubmitted] = useState(false);
+  const [fbLoading, setFbLoading] = useState(false);
+
+  const handleFeedbackSubmit = async () => {
+    setFbLoading(true);
+    try {
+      const attachmentUrls: string[] = [];
+      const allFiles = [...fbPhotoFiles, ...fbDocFiles];
+      for (const file of allFiles) {
+        const path = `${Date.now()}_${file.name.replace(/\s+/g, '_')}`;
+        const { data: uploadData } = await supabase.storage
+          .from('feedback-attachments')
+          .upload(path, file, { upsert: true });
+        if (uploadData) {
+          const { data: urlData } = supabase.storage
+            .from('feedback-attachments')
+            .getPublicUrl(uploadData.path);
+          attachmentUrls.push(urlData.publicUrl);
+        }
+      }
+      const firebaseUser = getCurrentUser();
+      await supabase.from('customer_feedback').insert({
+        user_id: firebaseUser?.uid ?? null,
+        user_email: firebaseUser?.email ?? null,
+        title: fbTitle,
+        description: fbDesc,
+        attachment_urls: attachmentUrls,
+        status: 'open',
+      });
+      setSubmitted(true);
+      setTimeout(() => { setShowFeedback(false); setSubmitted(false); setFbTitle(''); setFbDesc(''); setFbPhotos([]); setFbPhotoFiles([]); setFbDocs([]); setFbDocFiles([]); }, 2000);
+    } catch (e) {
+      console.error('Feedback submit error:', e);
+    }
+    setFbLoading(false);
+  };
   const photoRef = useRef<HTMLInputElement>(null);
   const docRef = useRef<HTMLInputElement>(null);
 
   const handlePhotoAdd = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
     const remaining = 4 - fbPhotos.length;
-    files.slice(0, remaining).forEach(f => {
+    const sliced = files.slice(0, remaining);
+    sliced.forEach(f => {
       const reader = new FileReader();
       reader.onload = ev => setFbPhotos(p => [...p, ev.target?.result as string]);
       reader.readAsDataURL(f);
     });
+    setFbPhotoFiles(prev => [...prev, ...sliced]);
     e.target.value = '';
   };
 
@@ -121,6 +327,7 @@ function HelpSupportScreen({ onBack }: { onBack: () => void }) {
     if (file.size > 2 * 1024 * 1024) { alert('Document must be less than 2MB'); return; }
     if (fbDocs.length >= 2) return;
     setFbDocs(p => [...p, file.name]);
+    setFbDocFiles(prev => [...prev, file]);
     e.target.value = '';
   };
 
@@ -156,9 +363,9 @@ function HelpSupportScreen({ onBack }: { onBack: () => void }) {
             {/* <button className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl bg-primary text-primary-foreground text-sm font-medium">
               <MessageCircle className="w-4 h-4" /> Chat with us
             </button> */}
-            <button className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl border border-border bg-card text-foreground text-sm font-medium">
+            {/* <button className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl border border-border bg-card text-foreground text-sm font-medium">
               <Mail className="w-4 h-4" /> Email us
-            </button>
+            </button> */}
           </div>
           <button
             onClick={() => setShowFeedback(true)}
@@ -172,7 +379,7 @@ function HelpSupportScreen({ onBack }: { onBack: () => void }) {
       {showFeedback && (
         <div className="fixed inset-0 z-50 flex items-end justify-center">
           <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowFeedback(false)} />
-          <div className="relative w-full max-w-md bg-background rounded-t-3xl flex flex-col" style={{ height: '85vh' }}>
+          <div className="relative w-full max-w-md bg-background rounded-t-3xl flex flex-col" style={{ height: 'calc(100vh - 70px)' }}>
             <div className="flex justify-center pt-3 pb-1 flex-shrink-0"><div className="w-10 h-1 rounded-full bg-border" /></div>
             <div className="flex items-center justify-between px-5 py-3 border-b border-border flex-shrink-0">
               <h3 className="text-base font-bold text-foreground">Feedback / Complaint</h3>
@@ -182,7 +389,7 @@ function HelpSupportScreen({ onBack }: { onBack: () => void }) {
             </div>
 
             {submitted ? (
-              <div className="flex flex-col items-center justify-center py-12 gap-3">
+              <div className="flex flex-col items-center justify-center py-16 gap-3">
                 <div className="w-16 h-16 rounded-full bg-green-500/10 flex items-center justify-center">
                   <Check className="w-8 h-8 text-green-500" />
                 </div>
@@ -190,60 +397,59 @@ function HelpSupportScreen({ onBack }: { onBack: () => void }) {
                 <p className="text-sm text-muted-foreground">Your feedback has been submitted.</p>
               </div>
             ) : (
-              <>
-                <div className="flex-1 overflow-y-auto min-h-0 px-5 py-4 space-y-4 scrollbar-thin">
-                  <div>
-                    <label className="text-sm font-medium text-foreground mb-1.5 block">Title</label>
-                    <input value={fbTitle} onChange={e => setFbTitle(e.target.value)}
-                      placeholder="e.g. App improvement suggestion"
-                      className="w-full h-11 px-4 rounded-xl border border-border bg-card text-foreground text-sm outline-none focus:border-primary" />
-                  </div>
-                  <div>
-                    <label className="text-sm font-medium text-foreground mb-1.5 block">Description</label>
-                    <textarea value={fbDesc} onChange={e => setFbDesc(e.target.value)}
-                      placeholder="Describe your feedback or complaint in detail..."
-                      className="w-full h-28 px-4 py-3 rounded-xl border border-border bg-card text-foreground text-sm outline-none focus:border-primary resize-none" />
-                  </div>
-                  <div>
-                    <label className="text-sm font-medium text-foreground mb-2 block">Attachments (optional)</label>
-                    <div className="flex gap-2 flex-wrap">
-                      {fbPhotos.map((src, i) => (
-                        <div key={i} className="relative w-16 h-16">
-                          <img src={src} className="w-16 h-16 rounded-xl object-cover border border-border" />
-                          <button onClick={() => setFbPhotos(p => p.filter((_, j) => j !== i))}
-                            className="absolute -top-1 -right-1 w-5 h-5 bg-destructive rounded-full flex items-center justify-center">
-                            <X className="w-3 h-3 text-white" />
-                          </button>
-                        </div>
-                      ))}
-                      {fbDocs.map((name, i) => (
-                        <div key={i} className="flex items-center gap-1.5 px-3 py-1.5 bg-secondary rounded-xl border border-border">
-                          <span className="text-xs text-foreground truncate max-w-[80px]">{name}</span>
-                          <button onClick={() => setFbDocs(p => p.filter((_, j) => j !== i))}><X className="w-3 h-3 text-muted-foreground" /></button>
-                        </div>
-                      ))}
-                      {(fbPhotos.length < 4 || fbDocs.length < 2) && (
-                        <button
-                          onClick={() => fbPhotos.length < 4 ? photoRef.current?.click() : docRef.current?.click()}
-                          className="w-16 h-16 rounded-xl border-2 border-dashed border-border flex items-center justify-center hover:border-primary transition-colors">
-                          <Plus className="w-6 h-6 text-muted-foreground" />
-                        </button>
-                      )}
+              <div className="flex-1 overflow-y-auto min-h-0 px-5 py-4 space-y-4">
+                <div>
+                  <label className="text-sm font-medium text-foreground mb-1.5 block">Title</label>
+                  <input value={fbTitle} onChange={e => setFbTitle(e.target.value)}
+                    placeholder="e.g. App improvement suggestion"
+                    className="w-full h-11 px-4 rounded-xl border border-border bg-card text-foreground text-sm outline-none focus:border-primary" />
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-foreground mb-1.5 block">Description</label>
+                  <textarea value={fbDesc} onChange={e => setFbDesc(e.target.value)}
+                    placeholder="Describe your feedback or complaint in detail..."
+                    className="w-full h-28 px-4 py-3 rounded-xl border border-border bg-card text-foreground text-sm outline-none focus:border-primary resize-none" />
+                </div>
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <div>
+                      <p className="text-sm font-medium text-foreground">Attachments (optional)</p>
+                      <p className="text-xs text-muted-foreground">Up to 4 photos · Documents max 2MB each</p>
                     </div>
-                    <p className="text-xs text-muted-foreground mt-1.5">Up to 4 photos · Documents max 2MB each</p>
-                    <input ref={photoRef} type="file" accept="image/*" multiple className="hidden" onChange={handlePhotoAdd} />
-                    <input ref={docRef} type="file" accept="application/pdf,.doc,.docx" className="hidden" onChange={handleDocAdd} />
+                    <Button variant="hero" size="sm"
+                      disabled={!fbTitle.trim() || !fbDesc.trim() || fbLoading}
+                      onClick={handleFeedbackSubmit}>
+                      {fbLoading ? <><Loader2 className="w-3 h-3 animate-spin" /> Sending...</> : 'Submit'}
+                    </Button>
                   </div>
+                  <div className="flex gap-2 flex-wrap">
+                    {fbPhotos.map((src, i) => (
+                      <div key={i} className="relative w-16 h-16">
+                        <img src={src} className="w-16 h-16 rounded-xl object-cover border border-border" />
+                        <button onClick={() => setFbPhotos(p => p.filter((_, j) => j !== i))}
+                          className="absolute -top-1 -right-1 w-5 h-5 bg-destructive rounded-full flex items-center justify-center">
+                          <X className="w-3 h-3 text-white" />
+                        </button>
+                      </div>
+                    ))}
+                    {fbDocs.map((name, i) => (
+                      <div key={i} className="flex items-center gap-1.5 px-3 py-1.5 bg-secondary rounded-xl border border-border">
+                        <span className="text-xs text-foreground truncate max-w-[80px]">{name}</span>
+                        <button onClick={() => setFbDocs(p => p.filter((_, j) => j !== i))}><X className="w-3 h-3 text-muted-foreground" /></button>
+                      </div>
+                    ))}
+                    {(fbPhotos.length < 4 || fbDocs.length < 2) && (
+                      <button
+                        onClick={() => fbPhotos.length < 4 ? photoRef.current?.click() : docRef.current?.click()}
+                        className="w-16 h-16 rounded-xl border-2 border-dashed border-border flex items-center justify-center hover:border-primary transition-colors">
+                        <Plus className="w-6 h-6 text-muted-foreground" />
+                      </button>
+                    )}
+                  </div>
+                  <input ref={photoRef} type="file" accept="image/*" multiple className="hidden" onChange={handlePhotoAdd} />
+                  <input ref={docRef} type="file" accept="application/pdf,.doc,.docx" className="hidden" onChange={handleDocAdd} />
                 </div>
-                {/* Submit pinned at bottom */}
-                <div className="flex-shrink-0 px-5 pb-8 pt-3 border-t border-border">
-                  <Button variant="hero" size="lg" className="w-full"
-                    disabled={!fbTitle.trim() || !fbDesc.trim()}
-                    onClick={() => setSubmitted(true)}>
-                    Submit Feedback
-                  </Button>
-                </div>
-              </>
+              </div>
             )}
           </div>
         </div>
@@ -285,7 +491,32 @@ function PrivacyPolicyScreen({ onBack }: { onBack: () => void }) {
 function ReferFriendScreen({ onBack }: { onBack: () => void }) {
   const [copied, setCopied] = useState(false);
   const rulesRef = useRef<HTMLDivElement>(null);
-  const referralCode = 'MEDI' + Math.random().toString(36).substring(2, 7).toUpperCase();
+  const [referralCode, setReferralCode] = useState('Loading...');
+  const [bonusMinutes, setBonusMinutes] = useState(0);
+  const [totalReferred, setTotalReferred] = useState(0);
+
+  useEffect(() => {
+    const unsubscribe = onAuthChange(async (u) => {
+      if (!u) return;
+      console.log('ReferFriendScreen: fetching for uid', u.uid);
+      const { data: userData, error: userErr } = await supabase
+        .from('users')
+        .select('referral_code, bonus_minutes')
+        .eq('id', u.uid)
+        .maybeSingle();
+      console.log('userData:', userData, 'error:', userErr);
+      const { count, error: refErr } = await supabase
+        .from('referrals')
+        .select('*', { count: 'exact', head: true })
+        .eq('referrer_id', u.uid)
+        .eq('status', 'completed');
+      console.log('referrals count:', count, 'error:', refErr);
+      setReferralCode(userData?.referral_code || ('MEDI' + u.uid.substring(0, 6).toUpperCase()));
+      setBonusMinutes(userData?.bonus_minutes ?? 0);
+      setTotalReferred(count ?? 0);
+    });
+    return () => unsubscribe();
+  }, []);
 
   const handleCopy = () => {
     navigator.clipboard.writeText(referralCode).then(() => {
@@ -333,11 +564,27 @@ function ReferFriendScreen({ onBack }: { onBack: () => void }) {
           </div>
           <h2 className="text-xl font-bold text-foreground mb-2">Invite & Earn</h2>
           <p className="text-sm text-muted-foreground leading-relaxed">
-            Invite your friends to MediCare. You earn <span className="text-primary font-semibold">₹100</span> and your friend gets <span className="text-primary font-semibold">₹100 off</span> their first consultation.
+            Invite your friends to MediCare. You both earn <span className="text-primary font-semibold">+2 bonus minutes</span> of free doctor chat after their first consultation.
           </p>
         </div>
 
-        {/* How it works */}
+        {/* Bonus Minutes Wallet */}
+        <div className="grid grid-cols-2 gap-3">
+          <div className="bg-primary/5 border border-primary/20 rounded-2xl p-4 text-center">
+            <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-2">
+              <Clock className="w-5 h-5 text-primary" />
+            </div>
+            <p className="text-2xl font-bold text-primary">{bonusMinutes}</p>
+            <p className="text-xs text-muted-foreground mt-0.5">Bonus Minutes</p>
+          </div>
+          <div className="bg-accent/5 border border-accent/20 rounded-2xl p-4 text-center">
+            <div className="w-10 h-10 rounded-full bg-accent/10 flex items-center justify-center mx-auto mb-2">
+              <Users className="w-5 h-5 text-accent" />
+            </div>
+            <p className="text-2xl font-bold text-accent">{totalReferred}</p>
+            <p className="text-xs text-muted-foreground mt-0.5">Friends Referred</p>
+          </div>
+        </div>
         <div>
           <p className="text-sm font-semibold text-foreground mb-3">How it works</p>
           <div className="space-y-3">
@@ -345,7 +592,7 @@ function ReferFriendScreen({ onBack }: { onBack: () => void }) {
               { step: '1', text: 'Share your unique referral code with friends' },
               { step: '2', text: 'Friend signs up using your code' },
               { step: '3', text: 'Friend completes their first consultation' },
-              { step: '4', text: 'You both get ₹100 added to your wallets' },
+              { step: '4', text: 'You both get +2 bonus minutes for free doctor chat!' },
             ].map(item => (
               <div key={item.step} className="flex items-center gap-3">
                 <div className="w-7 h-7 rounded-full bg-primary flex items-center justify-center flex-shrink-0">
