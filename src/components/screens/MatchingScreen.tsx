@@ -70,6 +70,11 @@ export function MatchingScreen({
         .from('users').select('name').eq('id', user.uid).maybeSingle();
       const patientName = userRow?.name || user.displayName || user.email || 'Patient';
 
+      // Fetch real instant chat price
+      const { data: priceRow } = await supabase
+        .from('admin_pricing').select('value').eq('key', 'instant_chat_price').single();
+      const fee = Number(priceRow?.value) || 99;
+
       const { data, error } = await supabase
         .from('consultation_requests')
         .insert({
@@ -83,6 +88,7 @@ export function MatchingScreen({
           status: 'searching',
           call_type: 'chat',
           consult_mode: consultMode,
+          fee,
         })
         .select('id')
         .single();

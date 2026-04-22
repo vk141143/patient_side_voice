@@ -42,13 +42,17 @@ function DoctorRatingPopup({ doctor, onClose }: { doctor: any; onClose: () => vo
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center">
+    <div className="fixed inset-0 z-[60] flex items-end justify-center">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative w-full max-w-md bg-background rounded-t-3xl p-6 space-y-5">
-        <div className="w-10 h-1 rounded-full bg-border mx-auto" />
+      <div className="relative w-full max-w-md bg-background rounded-t-3xl flex flex-col" style={{ maxHeight: '80vh', paddingBottom: 'env(safe-area-inset-bottom)' }}>
+        {/* Drag handle */}
+        <div className="flex-shrink-0 pt-4 pb-2 px-6">
+          <div className="w-10 h-1 rounded-full bg-border mx-auto" />
+        </div>
+
         {done ? (
-          <div className="text-center py-6">
-            <div className="w-16 h-16 rounded-full bg-green-500/10 flex items-center justify-center mx-auto mb-3">
+          <div className="flex-1 flex flex-col items-center justify-center py-8 px-6">
+            <div className="w-16 h-16 rounded-full bg-green-500/10 flex items-center justify-center mb-3">
               <Star className="w-8 h-8 text-green-500 fill-green-500" />
             </div>
             <p className="text-lg font-bold text-foreground">Thank you!</p>
@@ -56,28 +60,35 @@ function DoctorRatingPopup({ doctor, onClose }: { doctor: any; onClose: () => vo
           </div>
         ) : (
           <>
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="text-lg font-bold text-foreground">Rate Your Consultation</h3>
-                <p className="text-sm text-muted-foreground">How was your experience with {doctor.name}?</p>
-              </div>
-              <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-secondary">
-                <X className="w-4 h-4 text-muted-foreground" />
-              </button>
-            </div>
-            <div className="flex justify-center gap-3">
-              {[1,2,3,4,5].map(s => (
-                <button key={s} onMouseEnter={() => setHover(s)} onMouseLeave={() => setHover(0)} onClick={() => setRating(s)}>
-                  <Star className={`w-10 h-10 transition-all ${s <= (hover || rating) ? 'text-yellow-400 fill-yellow-400' : 'text-muted-foreground'}`} />
+            {/* Scrollable content */}
+            <div className="flex-1 overflow-y-auto px-6 pb-2 space-y-5"
+              style={{ scrollbarWidth: 'thin', scrollbarColor: '#D1D5DB #F9FAFB' }}>
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-lg font-bold text-foreground">Rate Your Consultation</h3>
+                  <p className="text-sm text-muted-foreground">How was your experience with Dr. {doctor.name}?</p>
+                </div>
+                <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-secondary">
+                  <X className="w-4 h-4 text-muted-foreground" />
                 </button>
-              ))}
+              </div>
+              <div className="flex justify-center gap-3">
+                {[1,2,3,4,5].map(s => (
+                  <button key={s} onMouseEnter={() => setHover(s)} onMouseLeave={() => setHover(0)} onClick={() => setRating(s)}>
+                    <Star className={`w-10 h-10 transition-all ${s <= (hover || rating) ? 'text-yellow-400 fill-yellow-400' : 'text-muted-foreground'}`} />
+                  </button>
+                ))}
+              </div>
+              <textarea value={review} onChange={e => setReview(e.target.value)}
+                placeholder="Share your experience (optional)..."
+                className="w-full h-28 px-4 py-3 rounded-xl border border-border bg-card text-foreground text-sm outline-none focus:border-primary resize-none" />
             </div>
-            <textarea value={review} onChange={e => setReview(e.target.value)}
-              placeholder="Share your experience (optional)..."
-              className="w-full h-24 px-4 py-3 rounded-xl border border-border bg-card text-foreground text-sm outline-none focus:border-primary resize-none" />
-            <Button variant="hero" size="lg" className="w-full" disabled={rating === 0 || submitting} onClick={handleSubmit}>
-              {submitting ? 'Submitting...' : 'Submit Rating'}
-            </Button>
+            {/* Fixed submit button — extra bottom padding to clear nav bar */}
+            <div className="flex-shrink-0 px-6 pt-3 pb-20 border-t border-border bg-background">
+              <Button variant="hero" size="lg" className="w-full" disabled={rating === 0 || submitting} onClick={handleSubmit}>
+                {submitting ? 'Submitting...' : 'Submit Rating'}
+              </Button>
+            </div>
           </>
         )}
       </div>

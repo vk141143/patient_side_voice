@@ -14,12 +14,13 @@ interface ChatScreenProps {
   consultationId?: string;
   messages?: any[];
   onSendMessage?: (text: string) => void;
-  onEndSession: (rxId?: string) => void;
+  onEndSession: (rxId?: string, sessionId?: string) => void;
   onBack: () => void;
   onDownloadPrescription?: () => void;
+  onVideoCall?: (sessionId: string) => void;
   currentPrescription?: Prescription | null;
   consultationFee?: number;
-  bonusMinutes?: number;
+  initialBonusMinutes?: number;
 }
 
 const EXTEND_OPTIONS = [
@@ -31,14 +32,14 @@ const EXTEND_OPTIONS = [
 // v2
 export function ChatScreen({
   doctor, sessionId: propSessionId, sessionData, consultationId,
-  onEndSession, onBack, onDownloadPrescription,
-  consultationFee = 0, bonusMinutes = 0,
+  onEndSession, onBack, onDownloadPrescription, onVideoCall,
+  consultationFee = 0, initialBonusMinutes = 0,
 }: ChatScreenProps) {
   const { walletBalance, deductWallet } = useApp();
   const [messages, setMessages] = useState<any[]>([]);
   const [input, setInput] = useState('');
   const [sessionId, setSessionId] = useState<string | null>(propSessionId ?? sessionData?.id ?? null);
-  const [sessionTime, setSessionTime] = useState(120 + bonusMinutes * 60);
+  const [sessionTime, setSessionTime] = useState(120 + initialBonusMinutes * 60);
   const [showEndConfirm, setShowEndConfirm] = useState(false);
   const [showAttach, setShowAttach] = useState(false);
   const [showExtend, setShowExtend] = useState(false);
@@ -51,6 +52,13 @@ export function ChatScreen({
   const [endedDoctorName, setEndedDoctorName] = useState('');
   const [timerPaused, setTimerPaused] = useState(false);
   const timerPausedRef = useRef(false);
+  const [bonusMinutes, setBonusMinutes] = useState(0);
+  const [showBonusOffer, setShowBonusOffer] = useState(false);
+  const [doctorTyping, setDoctorTyping] = useState(false);
+  const typingTimeoutRef = useRef<any>(null);
+  const userTypingThrottleRef = useRef<any>(null);
+  const [videoCallSessionId, setVideoCallSessionId] = useState<string | null>(null);
+  const [showVideoConfirm, setShowVideoConfirm] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -144,8 +152,25 @@ export function ChatScreen({
             } else if (msg.content === '__timer_resume__') {
               timerPausedRef.current = false;
               setTimerPaused(false);
+            } else if (msg.content === '__typing__' && msg.sender_role === 'doctor') {
+              setDoctorTyping(true);
+              clearTimeout(typingTimeoutRef.current);
+              typingTimeoutRef.current = setTimeout(() => setDoctorTyping(false), 3000);
+              return;
+            } else if (msg.content?.startsWith('__video_call__:') && msg.sender_role === 'doctor') {
+              // Doctor is inviting patient to video call
+              const vcSessionId = msg.content.split(':')[1];
+              setVideoCallSessionId(vcSessionId);
+              setShowVideoConfirm(true);
+              return;
+            } else if (msg.content?.startsWith('__time_extended__:') && msg.sender_role === 'doctor') {
+              const secs = parseInt(msg.content.split(':')[1], 10);
+              if (secs > 0) {
+                setSessionTime(prev => prev + secs);
+                setShowTimerEnd(false);
+                setCloseCountdown(10);
+              }
             }
-            // Still save to IndexedDB but add to messages for banner rendering
             await appendMessage(msg);
             setMessages(prev => prev.find(m => m.id === msg.id) ? prev : [...prev, msg]);
             return;
@@ -153,8 +178,10 @@ export function ChatScreen({
 
           await appendMessage(msg);
           setMessages(prev => prev.find(m => m.id === msg.id) ? prev : [...prev, msg]);
-          if (msg.sender_role === 'doctor' && !msg.is_read) {
-            supabase.from('instant_chat_messages').update({ is_read: true }).eq('id', msg.id);
+          if (msg.sender_role === 'doctor') {
+            setDoctorTyping(false); // hide typing when message arrives
+            clearTimeout(typingTimeoutRef.current);
+            if (!msg.is_read) supabase.from('instant_chat_messages').update({ is_read: true }).eq('id', msg.id);
           }
         })
       .subscribe();
@@ -184,30 +211,48 @@ export function ChatScreen({
             clearInterval(sessionPollRef.current);
             clearInterval(pollRef.current);
             setEndedDoctorName(data.doctor_name ?? doctorName);
+            // Fetch prescription for this session
+            const { data: rxRow } = await supabase.from('chat_prescriptions')
+              .select('id').eq('session_id', sessionId).order('created_at', { ascending: false }).limit(1).maybeSingle();
+            if (rxRow?.id) setLatestRxId(rxRow.id);
             setSessionEnded(true);
           }
         })
       .subscribe();
 
-    // Session end: 2s poll (primary reliable path)
-    sessionPollRef.current = setInterval(async () => {
-      const { data } = await supabase.from('chat_sessions')
-        .select('status, doctor_name').eq('id', sessionId).maybeSingle();
-      if (data?.status === 'ended') {
-        clearInterval(sessionPollRef.current);
-        clearInterval(pollRef.current);
-        setEndedDoctorName(data.doctor_name ?? doctorName);
-        setSessionEnded(true);
-      }
-    }, 2000);
+    // Session end: 2s poll (primary reliable path) — delayed 3s on start to allow session reopen to commit
+    const pollDelay = setTimeout(() => {
+      sessionPollRef.current = setInterval(async () => {
+        const { data } = await supabase.from('chat_sessions')
+          .select('status, doctor_name').eq('id', sessionId).maybeSingle();
+        if (data?.status === 'ended') {
+          clearInterval(sessionPollRef.current);
+          clearInterval(pollRef.current);
+          setEndedDoctorName(data.doctor_name ?? doctorName);
+          // Fetch prescription for this session if not already tracked
+          const { data: rxRow } = await supabase.from('chat_prescriptions')
+            .select('id').eq('session_id', sessionId).order('created_at', { ascending: false }).limit(1).maybeSingle();
+          if (rxRow?.id) setLatestRxId(rxRow.id);
+          setSessionEnded(true);
+        }
+      }, 2000);
+    }, 3000);
 
     return () => {
       clearInterval(pollRef.current);
       clearInterval(sessionPollRef.current);
+      clearTimeout(pollDelay);
       supabase.removeChannel(msgChannel);
       supabase.removeChannel(sessionChannel);
     };
   }, [sessionId]);
+
+  // Fetch user's bonus_minutes from DB on mount
+  useEffect(() => {
+    if (!user) return;
+    supabase.from('users').select('bonus_minutes').eq('id', user.uid).single()
+      .then(({ data }) => { if (data?.bonus_minutes > 0) setBonusMinutes(data.bonus_minutes); });
+  }, []);
 
   // Track latest prescription message
   useEffect(() => {
@@ -223,15 +268,24 @@ export function ChatScreen({
   // Session timer — pauses when doctor is writing prescription
   useEffect(() => {
     const timer = setInterval(() => {
-      if (timerPausedRef.current) return; // skip tick while paused
+      if (timerPausedRef.current) return;
       setSessionTime(prev => {
-        if (prev <= 0) { clearInterval(timer); setShowTimerEnd(true); return 0; }
+        if (prev <= 0) {
+          clearInterval(timer);
+          // Check bonus minutes first before showing timer end
+          if (bonusMinutes > 0) {
+            setShowBonusOffer(true);
+          } else {
+            setShowTimerEnd(true);
+          }
+          return 0;
+        }
         if (prev === 60 && !warningShown) { setWarningShown(true); setShowExtend(true); }
         return prev - 1;
       });
     }, 1000);
     return () => clearInterval(timer);
-  }, [warningShown]);
+  }, [warningShown, bonusMinutes]);
 
   // Close countdown
   useEffect(() => {
@@ -262,6 +316,21 @@ export function ChatScreen({
 
   const handleSend = () => {
     if (input.trim()) { sendMessage('text', input.trim()); setInput(''); }
+  };
+
+  const sendTypingSignal = () => {
+    if (!sessionId || !user || userTypingThrottleRef.current) return;
+    supabase.from('instant_chat_messages').insert({
+      session_id: sessionId,
+      sender_id: user.uid,
+      sender_role: 'patient',
+      type: 'system',
+      content: '__typing__',
+      is_read: false,
+    });
+    userTypingThrottleRef.current = setTimeout(() => {
+      userTypingThrottleRef.current = null;
+    }, 2000);
   };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -321,7 +390,29 @@ export function ChatScreen({
 
     localStorage.removeItem('mc_consult_id');
     setShowEndConfirm(false);
-    onEndSession(latestRxId ?? undefined);
+    onEndSession(latestRxId ?? undefined, sessionId ?? undefined);
+  };
+
+  const handleUseBonusTime = async () => {
+    if (!user || bonusMinutes <= 0) return;
+    const addSeconds = bonusMinutes * 60;
+    // Zero out bonus_minutes in DB
+    await supabase.from('users').update({ bonus_minutes: 0 }).eq('id', user.uid);
+    setBonusMinutes(0);
+    setSessionTime(addSeconds);
+    setShowBonusOffer(false);
+    setCloseCountdown(10);
+    // Notify doctor to extend their timer too
+    if (sessionId) {
+      await supabase.from('instant_chat_messages').insert({
+        session_id: sessionId,
+        sender_id: user.uid,
+        sender_role: 'patient',
+        type: 'system',
+        content: `__time_extended__:${addSeconds}`,
+        is_read: false,
+      });
+    }
   };
 
   const handleExtend = async (opt: typeof EXTEND_OPTIONS[0]) => {
@@ -331,6 +422,17 @@ export function ChatScreen({
     setShowExtend(false);
     setShowTimerEnd(false);
     setCloseCountdown(10);
+    // Notify doctor to extend their timer too
+    if (sessionId && user) {
+      await supabase.from('instant_chat_messages').insert({
+        session_id: sessionId,
+        sender_id: user.uid,
+        sender_role: 'patient',
+        type: 'system',
+        content: `__time_extended__:${opt.seconds}`,
+        is_read: false,
+      });
+    }
   };
 
   const formatTime = (s: number) => `${Math.floor(s / 60).toString().padStart(2, '0')}:${(s % 60).toString().padStart(2, '0')}`;
@@ -355,9 +457,10 @@ export function ChatScreen({
     // Timer control system messages — invisible in chat
     if (msg.type === 'system' && (
       msg.content === '__timer_pause__' ||
-      msg.content === '__timer_resume__'
+      msg.content === '__timer_resume__' ||
+      msg.content?.startsWith('__time_extended__:')
     )) {
-      return null;
+      return <div key={msg.id} style={{ display: 'none' }} />;
     }
 
     // System: doctor writing prescription
@@ -541,6 +644,26 @@ export function ChatScreen({
         }`}>
           {timerPaused ? '⏸ Paused' : `⏱ ${formatTime(sessionTime)}`}
         </div>
+        {onVideoCall && sessionId && (
+          <button
+            onClick={async () => {
+              // Notify doctor that patient wants video call
+              if (user) {
+                await supabase.from('instant_chat_messages').insert({
+                  session_id: sessionId,
+                  sender_id: user.uid,
+                  sender_role: 'patient',
+                  type: 'system',
+                  content: `__video_call__:${sessionId}`,
+                  is_read: false,
+                });
+              }
+              onVideoCall(sessionId);
+            }}
+            className="w-9 h-9 flex items-center justify-center rounded-full bg-blue-500/10 hover:bg-blue-500/20 transition-colors flex-shrink-0">
+            <Video className="w-4 h-4 text-blue-500" />
+          </button>
+        )}
         <button
           onClick={() => setShowEndConfirm(true)}
           className="ml-1 px-3 py-1.5 rounded-full bg-destructive text-destructive-foreground text-xs font-bold hover:bg-destructive/90 transition-colors flex-shrink-0">
@@ -582,6 +705,35 @@ export function ChatScreen({
             </div>
           </div>
         )}
+        {/* Doctor typing indicator — WhatsApp style */}
+        {doctorTyping && (
+          <div className="flex justify-start items-end gap-2">
+            {doctorAvatar
+              ? <img src={doctorAvatar} alt={doctorName} className="w-6 h-6 rounded-full object-cover flex-shrink-0 mb-1" />
+              : <div className="w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0 mb-1"><span className="text-[10px] font-bold text-primary">{doctorName?.charAt(0)}</span></div>
+            }
+            <div className="bg-secondary rounded-2xl rounded-bl-sm px-4 py-3 flex items-center gap-1.5">
+              <span
+                className="w-2 h-2 rounded-full bg-muted-foreground/60 inline-block"
+                style={{ animation: 'typingBounce 1.2s ease-in-out infinite', animationDelay: '0ms' }}
+              />
+              <span
+                className="w-2 h-2 rounded-full bg-muted-foreground/60 inline-block"
+                style={{ animation: 'typingBounce 1.2s ease-in-out infinite', animationDelay: '200ms' }}
+              />
+              <span
+                className="w-2 h-2 rounded-full bg-muted-foreground/60 inline-block"
+                style={{ animation: 'typingBounce 1.2s ease-in-out infinite', animationDelay: '400ms' }}
+              />
+            </div>
+          </div>
+        )}
+        <style>{`
+          @keyframes typingBounce {
+            0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
+            30% { transform: translateY(-6px); opacity: 1; }
+          }
+        `}</style>
         <div ref={messagesEndRef} />
       </div>
 
@@ -612,7 +764,7 @@ export function ChatScreen({
             <Paperclip className="w-5 h-5" />
           </button>
           <div className="flex-1 relative">
-            <input type="text" value={input} onChange={e => setInput(e.target.value)}
+            <input type="text" value={input} onChange={e => { setInput(e.target.value); sendTypingSignal(); }}
               onKeyDown={e => e.key === 'Enter' && handleSend()}
               placeholder="Type your message..."
               className="w-full h-12 pl-4 pr-12 rounded-full bg-secondary text-foreground placeholder:text-muted-foreground outline-none focus:ring-2 focus:ring-primary/20" />
@@ -643,6 +795,32 @@ export function ChatScreen({
             <div className="flex gap-3">
               <Button variant="outline" className="flex-1" onClick={() => setShowEndConfirm(false)}>Cancel</Button>
               <Button className="flex-1 bg-destructive hover:bg-destructive/90 text-destructive-foreground" onClick={handleEndSession}>Yes, End</Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bonus Time Offer Popup */}
+      {showBonusOffer && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center px-6">
+          <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
+          <div className="relative w-full max-w-sm bg-background rounded-2xl p-6 shadow-xl text-center">
+            <div className="w-16 h-16 rounded-full bg-emerald-100 flex items-center justify-center mx-auto mb-4">
+              <span className="text-3xl">🎁</span>
+            </div>
+            <h3 className="text-lg font-bold text-foreground mb-1">You have free time!</h3>
+            <p className="text-sm text-muted-foreground mb-2">
+              You have <span className="font-bold text-emerald-600">{bonusMinutes} bonus minute{bonusMinutes > 1 ? 's' : ''}</span> from your referral.
+            </p>
+            <p className="text-sm text-muted-foreground mb-6">Would you like to use it to continue this consultation?</p>
+            <div className="flex gap-3">
+              <Button variant="outline" className="flex-1" onClick={() => {
+                setShowBonusOffer(false);
+                setShowTimerEnd(true);
+              }}>No, Skip</Button>
+              <Button className="flex-1 bg-emerald-500 hover:bg-emerald-600 text-white" onClick={handleUseBonusTime}>
+                Yes, Use Free Time
+              </Button>
             </div>
           </div>
         </div>
@@ -709,13 +887,41 @@ export function ChatScreen({
             </p>
             <div className="space-y-3">
               {latestRxId && (
-                <Button variant="hero" size="lg" className="w-full" onClick={() => {
+                <Button variant="hero" size="lg" className="w-full" onClick={async () => {
+                  if (consultationFee > 0) await deductWallet(consultationFee);
                   setSessionEnded(false);
                   fetchRx(latestRxId);
                   setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
                 }}>View Prescription</Button>
               )}
-              <Button variant="outline" size="lg" className="w-full" onClick={() => onEndSession(latestRxId ?? undefined)}>Go Home</Button>
+              <Button variant="outline" size="lg" className="w-full" onClick={async () => {
+                // Deduct wallet when doctor ends the session
+                if (consultationFee > 0) await deductWallet(consultationFee);
+                onEndSession(latestRxId ?? undefined, sessionId ?? undefined);
+              }}>Go Home</Button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Video Call Invitation */}
+      {showVideoConfirm && onVideoCall && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center px-4" style={{ background: 'rgba(0,0,0,0.8)' }}>
+          <div className="bg-background rounded-2xl p-6 text-center w-full max-w-sm shadow-2xl">
+            <div className="w-16 h-16 rounded-full bg-blue-100 flex items-center justify-center mx-auto mb-4">
+              <Video className="w-8 h-8 text-blue-500" />
+            </div>
+            <h2 className="text-lg font-bold text-foreground mb-2">Video Call Invitation</h2>
+            <p className="text-sm text-muted-foreground mb-6 leading-relaxed">
+              Dr. {doctorName} is inviting you to a video consultation.
+            </p>
+            <div className="space-y-3">
+              <Button variant="hero" size="lg" className="w-full bg-blue-500 hover:bg-blue-600" onClick={() => {
+                setShowVideoConfirm(false);
+                if (videoCallSessionId) onVideoCall(videoCallSessionId);
+              }}>
+                <Video className="w-4 h-4" /> Join Video Call
+              </Button>
+              <Button variant="outline" size="lg" className="w-full" onClick={() => setShowVideoConfirm(false)}>Decline</Button>
             </div>
           </div>
         </div>

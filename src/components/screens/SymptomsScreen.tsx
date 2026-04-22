@@ -1,7 +1,9 @@
 import { useState, useRef, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
-import { ArrowLeft, Search, ChevronDown, AlertCircle, Camera, Paperclip, X, FileText, Loader2, Zap, Users } from 'lucide-react';
+import { ArrowLeft, Search, ChevronDown, AlertCircle, Camera, Paperclip, X, FileText, Loader2, Zap, Users, Wallet } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+import { WalletRechargeModal } from '@/components/WalletRechargeModal';
+import { useApp } from '@/context/AppContext';
 
 export type ConsultMode = 'instant' | 'available';
 
@@ -20,6 +22,7 @@ const durations = ['Today', '2-3 days', '1 week', '1+ week'];
 const severities = ['Mild', 'Moderate', 'Severe'];
 
 export function SymptomsScreen({ onSubmit, onBack }: SymptomsScreenProps) {
+  const { walletBalance, addToWallet } = useApp();
   const [specialty, setSpecialty] = useState('');
   const [search, setSearch] = useState('');
   const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -33,9 +36,13 @@ export function SymptomsScreen({ onSubmit, onBack }: SymptomsScreenProps) {
   const [mode, setMode] = useState<ConsultMode>('instant');
   const [instantPrice, setInstantPrice] = useState(99);
   const [availablePrice, setAvailablePrice] = useState(299);
+  const [showWallet, setShowWallet] = useState(false);
   const photoRef = useRef<HTMLInputElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
+
+  const requiredFee = mode === 'instant' ? instantPrice : availablePrice;
+  const hasEnoughBalance = walletBalance >= requiredFee;
 
   // Fetch prices + realtime subscription for instant admin updates
   useEffect(() => {
@@ -263,18 +270,51 @@ export function SymptomsScreen({ onSubmit, onBack }: SymptomsScreenProps) {
 
       {/* CTA */}
       <div className="px-5 pb-8 pt-4 bg-background border-t border-border flex-shrink-0">
-        <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center justify-between mb-2">
           <span className="text-sm text-muted-foreground">Consultation fee</span>
           <span className="text-lg font-bold text-primary">
             {mode === 'instant' ? `₹${instantPrice}` : `Starts ₹${availablePrice}`}
           </span>
         </div>
+        <div className="flex items-center justify-between mb-3">
+          <span className="text-xs text-muted-foreground">Wallet balance</span>
+          <button onClick={() => setShowWallet(true)}
+            className={`flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full border transition-colors ${
+              hasEnoughBalance
+                ? 'text-emerald-600 bg-emerald-50 border-emerald-200'
+                : 'text-destructive bg-destructive/10 border-destructive/20'
+            }`}>
+            <Wallet className="w-3.5 h-3.5" />
+            ₹{walletBalance}
+            {!hasEnoughBalance && <span className="ml-1">· Recharge</span>}
+          </button>
+        </div>
+        {!hasEnoughBalance && (
+          <div className="flex items-center gap-2 bg-destructive/10 border border-destructive/20 rounded-xl px-3 py-2.5 mb-3">
+            <AlertCircle className="w-4 h-4 text-destructive flex-shrink-0" />
+            <p className="text-xs text-destructive font-medium">
+              Insufficient balance. Need ₹{requiredFee - walletBalance} more to proceed.
+            </p>
+          </div>
+        )}
         <Button variant="hero" size="xl" className="w-full"
-          onClick={() => { if (specialty && agreed) onSubmit([specialty], description, uploadedFile?.url, mode); }}
+          onClick={() => {
+            if (!specialty || !agreed) return;
+            if (!hasEnoughBalance) { setShowWallet(true); return; }
+            onSubmit([specialty], description, uploadedFile?.url, mode);
+          }}
           disabled={!specialty || !agreed}>
-          Find a Doctor
+          {!hasEnoughBalance ? 'Recharge Wallet' : 'Find a Doctor'}
         </Button>
       </div>
+
+      {showWallet && (
+        <WalletRechargeModal
+          currentBalance={walletBalance}
+          onRecharge={addToWallet}
+          onClose={() => setShowWallet(false)}
+        />
+      )}
     </div>
   );
 }

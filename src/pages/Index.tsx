@@ -9,6 +9,7 @@ import { SymptomsScreen, ConsultMode } from '@/components/screens/SymptomsScreen
 import { MatchingScreen } from '@/components/screens/MatchingScreen';
 import { AvailableDoctorsScreen } from '@/components/screens/AvailableDoctorsScreen';
 import { ChatScreen } from '@/components/screens/ChatScreen';
+import { VideoCallScreen } from '@/components/screens/VideoCallScreen';
 import { PrescriptionScreen } from '@/components/screens/PrescriptionScreen';
 import { RecordsScreen } from '@/components/screens/RecordsScreen';
 import { UserProfileScreen } from '@/components/screens/UserProfileScreen';
@@ -99,6 +100,7 @@ function AppContent() {
   const [consultRequestId, setConsultRequestIdState] = useState<string | null>(() => localStorage.getItem('mc_consult_id'));
   const [chatSessionData, setChatSessionData] = useState<any | null>(null);
   const [chatRxId, setChatRxId] = useState<string | null>(null);
+  const [videoCallSessionId, setVideoCallSessionId] = useState<string | null>(null);
   const setConsultRequestId = (id: string | null) => {
     if (id) localStorage.setItem('mc_consult_id', id);
     else localStorage.removeItem('mc_consult_id');
@@ -131,7 +133,7 @@ function AppContent() {
       case 'forgot-password': return <ForgotPasswordScreen onBack={() => setCurrentScreen('login')} onSuccess={() => setCurrentScreen('login')} />;
 
       // Main app
-      case 'home': return <HomeScreen user={user} consultations={consultations} walletBalance={walletBalance} onRecharge={handleRecharge} onConsultNow={() => setCurrentScreen('symptoms')} onBookDoctor={() => setCurrentScreen('consultation-type')} onProfile={() => setCurrentScreen('user-profile')} onNotifications={() => setCurrentScreen('user-notifications')} onConsultAgain={() => setCurrentScreen('consult-again')} onBookAppointment={() => setCurrentScreen('select-specialty')} onReferEarn={() => setCurrentScreen('user-profile')} onHelpCentre={() => setCurrentScreen('user-profile')} onRecords={() => setCurrentScreen('records')} />;
+      case 'home': return <HomeScreen user={user} walletBalance={walletBalance} onRecharge={handleRecharge} onConsultNow={() => setCurrentScreen('symptoms')} onBookDoctor={() => setCurrentScreen('consultation-type')} onProfile={() => setCurrentScreen('user-profile')} onNotifications={() => setCurrentScreen('user-notifications')} onConsultAgain={() => setCurrentScreen('symptoms')} onBookAppointment={() => setCurrentScreen('select-specialty')} onReferEarn={() => setCurrentScreen('user-profile')} onHelpCentre={() => setCurrentScreen('user-profile')} onRecords={() => setCurrentScreen('records')} />;
 
       // Consult Now flow
       case 'symptoms': return <SymptomsScreen onSubmit={(symptoms, desc, reportUrl, mode) => {
@@ -177,12 +179,42 @@ function AppContent() {
         setCurrentDoctor(chatDoctor as any);
         setCurrentScreen('chat');
       }} onBack={() => setCurrentScreen(consultMode === 'available' ? 'symptoms' : 'matching')} />;
-      case 'chat': return currentDoctor ? <ChatScreen doctor={currentDoctor} sessionData={chatSessionData ?? undefined} consultationId={consultRequestId ?? undefined} consultationFee={chatFee} bonusMinutes={bonusMinutesForChat} onEndSession={(rxId?: string) => { if (rxId) setChatRxId(rxId); setCurrentScreen('prescription'); }} onBack={() => setCurrentScreen('home')} onDownloadPrescription={() => {}} /> : null;
+      case 'chat': return currentDoctor ? <ChatScreen doctor={currentDoctor} sessionData={chatSessionData ?? undefined} consultationId={consultRequestId ?? undefined} consultationFee={chatFee} initialBonusMinutes={bonusMinutesForChat} onVideoCall={(vcSessionId) => { setVideoCallSessionId(vcSessionId); setCurrentScreen('video-call'); }} onEndSession={async (rxId?: string, passedSessionId?: string) => {
+        if (rxId) {
+          setChatRxId(rxId);
+        } else {
+          // Doctor ended — fetch prescription by session_id
+          const sid = passedSessionId ?? chatSessionData?.id ?? null;
+          let resolvedSid = sid;
+          if (!resolvedSid && consultRequestId) {
+            const { data: sess } = await supabase.from('chat_sessions')
+              .select('id').eq('consultation_id', consultRequestId).maybeSingle();
+            resolvedSid = sess?.id ?? null;
+          }
+          if (resolvedSid) {
+            const { data: rxRow } = await supabase.from('chat_prescriptions')
+              .select('id').eq('session_id', resolvedSid)
+              .order('created_at', { ascending: false }).limit(1).maybeSingle();
+            if (rxRow?.id) setChatRxId(rxRow.id);
+          }
+        }
+        setCurrentScreen('prescription');
+      }} onBack={() => setCurrentScreen('home')} onDownloadPrescription={() => {}} /> : null;
+      case 'video-call': return videoCallSessionId && currentDoctor ? (
+        <VideoCallScreen
+          sessionId={videoCallSessionId}
+          doctorName={(currentDoctor as any).full_name ?? currentDoctor.name}
+          onLeave={() => setCurrentScreen('chat')}
+        />
+      ) : null;
       case 'prescription': return <PrescriptionScreen rxId={chatRxId} prescription={currentPrescription ?? null as any} walletBalance={walletBalance} onRecharge={handleRecharge} onConsultAgain={() => setCurrentScreen('symptoms')} onBookSameDoctor={() => setCurrentScreen('symptoms')} onGoHome={() => setCurrentScreen('home')} onOrderMedicines={() => setCurrentScreen('pharmacy-selection')} onSelectDoctor={async (doctor, callType) => {
-        // Clear old session data so ChatScreen starts fresh
-        setChatSessionData(null);
-        setConsultRequestId(null);
-        setChatFee(0);
+        // Fetch the existing session_id from chat_prescriptions so we reuse same session + history
+        let existingSessionId: string | null = null;
+        if (chatRxId) {
+          const { data: rxRow } = await supabase.from('chat_prescriptions')
+            .select('session_id').eq('id', chatRxId).single();
+          existingSessionId = rxRow?.session_id ?? null;
+        }
 
         const chatDoctor = {
           id: doctor.firebase_uid ?? doctor.id,
@@ -197,35 +229,39 @@ function AppContent() {
         setCurrentDoctor(chatDoctor as any);
         setSearchedSpecialty(doctor.specialization ?? '');
 
-        // Fetch fee for this doctor
-        const { data: priceRow } = await supabase.from('doctor_pricing')
-          .select('chat_price').eq('doctor_id', doctor.firebase_uid ?? doctor.id).maybeSingle();
-        const fee = Number(priceRow?.chat_price) || 299;
-        setChatFee(fee);
-
-        // Create a fresh consultation_request — doctor will get notified and accept
-        const { getCurrentUser } = await import('@/services/auth');
-        const u = getCurrentUser();
-        if (!u) return;
-        const { data: userRow } = await supabase.from('users').select('name').eq('id', u.uid).maybeSingle();
-        const patientName = userRow?.name || u.email || 'Patient';
-
-        const { data: req } = await supabase.from('consultation_requests').insert({
-          patient_id: u.uid,
-          patient_name: patientName,
-          specialty: doctor.specialization ?? '',
-          status: 'searching',
-          doctor_id: doctor.firebase_uid ?? doctor.id,
-          call_type: callType,
-          fee,
-          consult_mode: 'available',
-        }).select('id').single();
-
-        if (req?.id) {
-          setConsultRequestId(req.id);
+        if (existingSessionId) {
+          // Reopen existing session — wait for DB write before ChatScreen polls
+          await supabase.from('chat_sessions')
+            .update({ status: 'active', ended_at: null })
+            .eq('id', existingSessionId);
+          await new Promise(r => setTimeout(r, 600));
+          setChatSessionData({ id: existingSessionId });
+          setConsultRequestId(null);
+          const { data: priceRow } = await supabase.from('doctor_pricing')
+            .select('chat_price').eq('doctor_id', doctor.firebase_uid ?? doctor.id).maybeSingle();
+          setChatFee(Number(priceRow?.chat_price) || 299);
+          setCurrentScreen('chat');
+        } else {
+          // No existing session — create fresh consultation request
+          setChatSessionData(null);
+          setConsultRequestId(null);
+          const { data: priceRow } = await supabase.from('doctor_pricing')
+            .select('chat_price').eq('doctor_id', doctor.firebase_uid ?? doctor.id).maybeSingle();
+          const fee = Number(priceRow?.chat_price) || 299;
+          setChatFee(fee);
+          const { getCurrentUser } = await import('@/services/auth');
+          const u = getCurrentUser();
+          if (!u) return;
+          const { data: userRow } = await supabase.from('users').select('name').eq('id', u.uid).maybeSingle();
+          const patientName = userRow?.name || u.email || 'Patient';
+          const { data: req } = await supabase.from('consultation_requests').insert({
+            patient_id: u.uid, patient_name: patientName,
+            specialty: doctor.specialization ?? '', status: 'searching',
+            doctor_id: doctor.firebase_uid ?? doctor.id, call_type: callType, fee, consult_mode: 'available',
+          }).select('id').single();
+          if (req?.id) setConsultRequestId(req.id);
+          setCurrentScreen('chat');
         }
-        // Navigate to chat — ChatScreen will find/wait for the new session doctor creates
-        setCurrentScreen('chat');
       }} />;
 
       // Other main screens

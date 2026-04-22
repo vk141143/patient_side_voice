@@ -12,6 +12,7 @@ export type AppScreen =
   | 'symptoms'
   | 'matching'
   | 'chat'
+  | 'video-call'
   | 'prescription'
   | 'records'
   | 'notifications'
