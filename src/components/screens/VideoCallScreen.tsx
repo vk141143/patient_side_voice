@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Loader2, PhoneOff, X, Mic, MicOff, Video, VideoOff } from 'lucide-react';
+import { Loader2, PhoneOff, X, Mic, MicOff, Video, VideoOff, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { supabase } from '@/lib/supabase';
 import { MeetingProvider, useMeeting, useParticipant } from '@videosdk.live/react-sdk';
@@ -31,7 +31,7 @@ function ParticipantTile({ participantId, isLocal }: { participantId: string; is
   const audioRef = useRef<HTMLAudioElement>(null);
 
   useEffect(() => {
-    if (videoRef.current && webcamOn && webcamStream) {
+    if (videoRef.current && webcamOn && webcamStream?.track) {
       const mediaStream = new MediaStream([webcamStream.track]);
       videoRef.current.srcObject = mediaStream;
       videoRef.current.play().catch(() => {});
@@ -41,7 +41,7 @@ function ParticipantTile({ participantId, isLocal }: { participantId: string; is
   }, [webcamOn, webcamStream]);
 
   useEffect(() => {
-    if (audioRef.current && !isLocal && micOn && micStream) {
+    if (audioRef.current && !isLocal && micOn && micStream?.track) {
       const mediaStream = new MediaStream([micStream.track]);
       audioRef.current.srcObject = mediaStream;
       audioRef.current.play().catch(() => {});
@@ -78,20 +78,44 @@ function ParticipantTile({ participantId, isLocal }: { participantId: string; is
 function MeetingView({ onLeave, doctorName }: { onLeave: () => void; doctorName: string }) {
   const [micOn, setMicOn] = useState(true);
   const [camOn, setCamOn] = useState(true);
+  const [flipping, setFlipping] = useState(false);
+  const currentDeviceIdRef = useRef<string | null>(null);
 
-  const { leave, toggleMic, toggleWebcam, participants, localParticipant } = useMeeting({
+  const { join, leave, toggleMic, toggleWebcam, changeWebcam, participants, localParticipant } = useMeeting({
     onMeetingLeft: onLeave,
     onError: (data: any) => console.error('[VideoCall] meeting error:', data),
   });
+
+  // Join the meeting on mount
+  useEffect(() => {
+    join();
+  }, []);
 
   const handleToggleMic = () => { toggleMic(); setMicOn(p => !p); };
   const handleToggleCam = () => { toggleWebcam(); setCamOn(p => !p); };
   const handleLeave = () => { leave(); onLeave(); };
 
-  const allParticipants = [...participants.keys()];
-  const remoteParticipants = localParticipant
-    ? allParticipants.filter(id => id !== localParticipant.id)
-    : allParticipants;
+  const handleFlipCamera = async () => {
+    if (flipping) return;
+    setFlipping(true);
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const cameras = devices.filter(d => d.kind === 'videoinput');
+      if (cameras.length < 2) { setFlipping(false); return; }
+      // Find the camera that is NOT currently active
+      const current = currentDeviceIdRef.current;
+      const next = cameras.find(c => c.deviceId !== current) ?? cameras[0];
+      currentDeviceIdRef.current = next.deviceId;
+      await changeWebcam(next.deviceId);
+    } catch (e) {
+      console.error('[VideoCall] flip camera error:', e);
+    }
+    setFlipping(false);
+  };
+
+  // Use localParticipant.id from useMeeting — correct SDK API
+  const localId = localParticipant?.id ?? null;
+  const remoteParticipants = [...participants.keys()].filter(id => id !== localId);
 
   return (
     <div className="flex flex-col h-full bg-gray-950">
@@ -109,16 +133,16 @@ function MeetingView({ onLeave, doctorName }: { onLeave: () => void; doctorName:
           ))
         )}
 
-        {/* Local participant — small pip */}
-        {localParticipant && (
+        {/* Local participant — PiP bottom right */}
+        {localId && (
           <div className="h-36 w-24 absolute bottom-24 right-4 rounded-xl overflow-hidden shadow-lg border-2 border-gray-700 z-10">
-            <ParticipantTile participantId={localParticipant.id} isLocal={true} />
+            <ParticipantTile participantId={localId} isLocal={true} />
           </div>
         )}
       </div>
 
       {/* Controls */}
-      <div className="flex items-center justify-center gap-6 px-4 py-5 bg-gray-900 border-t border-gray-800">
+      <div className="flex items-center justify-center gap-4 px-4 py-5 bg-gray-900 border-t border-gray-800">
         <button
           onClick={handleToggleMic}
           className={`w-14 h-14 rounded-full flex items-center justify-center transition-colors shadow-lg ${micOn ? 'bg-gray-700 hover:bg-gray-600' : 'bg-red-600 hover:bg-red-700'}`}>
@@ -133,6 +157,12 @@ function MeetingView({ onLeave, doctorName }: { onLeave: () => void; doctorName:
           onClick={handleToggleCam}
           className={`w-14 h-14 rounded-full flex items-center justify-center transition-colors shadow-lg ${camOn ? 'bg-gray-700 hover:bg-gray-600' : 'bg-red-600 hover:bg-red-700'}`}>
           {camOn ? <Video className="w-6 h-6 text-white" /> : <VideoOff className="w-6 h-6 text-white" />}
+        </button>
+        <button
+          onClick={handleFlipCamera}
+          disabled={flipping}
+          className="w-14 h-14 rounded-full bg-gray-700 hover:bg-gray-600 flex items-center justify-center transition-colors shadow-lg disabled:opacity-50">
+          <RefreshCw className={`w-6 h-6 text-white ${flipping ? 'animate-spin' : ''}`} />
         </button>
       </div>
     </div>
@@ -198,7 +228,6 @@ export function VideoCallScreen({ sessionId, doctorName, onLeave }: VideoCallScr
             name: 'Patient',
           }}
           token={roomData.token}
-          joinWithoutUserInteraction
         >
           <MeetingView onLeave={onLeave} doctorName={doctorName} />
         </MeetingProvider>
