@@ -36,15 +36,23 @@ export function RecordsScreen({ onBack, onViewPrescription }: RecordsScreenProps
         .eq('patient_id', user.uid)
         .order('started_at', { ascending: false });
 
-      // OPD appointments — match by patient_id or patient name
+      // OPD appointments — query by patient_name (from DB) or fallback to uid match
       const { data: userRow } = await supabase.from('users').select('name').eq('id', user.uid).maybeSingle();
       const patientName = userRow?.name ?? '';
 
       const { data: opd } = await supabase
         .from('opd_appointments')
-        .select('id, appointment_date, time_slot, status, fee, symptoms, doctors:doctor_id(full_name, specialization, selfie_url)')
+        .select('id, appointment_date, time_slot, status, fee, doctor_id')
         .eq('patient_name', patientName)
         .order('appointment_date', { ascending: false });
+
+      // Fetch doctor details for OPD appointments separately
+      const doctorIds = [...new Set((opd ?? []).map(o => o.doctor_id).filter(Boolean))];
+      const { data: opdDoctors } = doctorIds.length
+        ? await supabase.from('doctors').select('firebase_uid, full_name, specialization').in('firebase_uid', doctorIds)
+        : { data: [] };
+      const doctorMap: Record<string, any> = {};
+      (opdDoctors ?? []).forEach(d => { doctorMap[d.firebase_uid] = d; });
 
       const chatItems = (sessions ?? []).map(s => {
         const start = s.started_at ? new Date(s.started_at) : null;
@@ -66,8 +74,8 @@ export function RecordsScreen({ onBack, onViewPrescription }: RecordsScreenProps
       const opdItems = (opd ?? []).map(o => ({
         id: o.id,
         type: 'opd' as const,
-        doctorName: (o.doctors as any)?.full_name ?? 'Doctor',
-        specialty: (o.doctors as any)?.specialization ?? '',
+        doctorName: doctorMap[o.doctor_id]?.full_name ?? 'Doctor',
+        specialty: doctorMap[o.doctor_id]?.specialization ?? '',
         date: o.appointment_date ?? '',
         duration: null,
         slot: o.time_slot,

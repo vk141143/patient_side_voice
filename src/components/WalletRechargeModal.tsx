@@ -2,6 +2,37 @@ import { useState } from 'react';
 import { X, Wallet, CheckCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
+// ── PAYMENT GATEWAY (Cashfree) — commented out for now ──────────────
+// Will be re-enabled when payment integration is ready for production.
+//
+// import { supabase } from '@/lib/supabase';
+// import { getCurrentUser } from '@/services/auth';
+//
+// function loadCashfreeSDK(): Promise<void> {
+//   return new Promise((resolve, reject) => {
+//     if ((window as any).Cashfree) { resolve(); return; }
+//     const script = document.createElement('script');
+//     script.src = 'https://sdk.cashfree.com/js/v3/cashfree.js';
+//     script.onload = () => resolve();
+//     script.onerror = () => reject(new Error('Failed to load Cashfree SDK'));
+//     document.head.appendChild(script);
+//   });
+// }
+//
+// const handlePay = async () => {
+//   const user = getCurrentUser();
+//   const { data: orderData } = await supabase.functions.invoke('create-cashfree-order', {
+//     body: { amount: parsed, userId: user.uid, ... },
+//   });
+//   const cashfree = (window as any).Cashfree({ mode: 'sandbox' });
+//   const result = await cashfree.checkout({ paymentSessionId: orderData.paymentSessionId, redirectTarget: '_modal' });
+//   if (result.paymentDetails?.paymentMessage === 'Payment successful') {
+//     await supabase.functions.invoke('verify-cashfree-payment', { body: { orderId: orderData.orderId, userId: user.uid } });
+//     onRecharge(parsed);
+//   }
+// };
+// ────────────────────────────────────────────────────────────────────
+
 interface WalletRechargeModalProps {
   currentBalance: number;
   onRecharge: (amount: number) => void;
@@ -125,7 +156,6 @@ export function WalletRechargeModal({ currentBalance, onRecharge, onClose }: Wal
                 </div>
               </div>
 
-              {/* After recharge preview / Pay button */}
               {isValid && (
                 <Button
                   variant="hero"
@@ -134,7 +164,7 @@ export function WalletRechargeModal({ currentBalance, onRecharge, onClose }: Wal
                   onClick={handlePay}
                 >
                   <Wallet className="w-5 h-5" />
-                  Pay ₹{parsed} & Recharge
+                  Add ₹{parsed} to Wallet
                 </Button>
               )}
             </div>
@@ -142,7 +172,7 @@ export function WalletRechargeModal({ currentBalance, onRecharge, onClose }: Wal
             {/* Footer */}
             <div className="flex-shrink-0 px-6 pt-3 pb-6 border-t border-border bg-background">
               <p className="text-xs text-muted-foreground text-center">
-                Secured by 256-bit encryption · Instant credit
+                Secured · Instant credit
               </p>
             </div>
           </>

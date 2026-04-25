@@ -87,7 +87,7 @@ export function OTPScreen({ email = '', onVerify, onBack }: OTPScreenProps) {
 
         {!verified && (
           <p className="text-sm text-muted-foreground text-center mb-8">
-            Click the link in the email to verify your account. This page will update automatically.
+            Click the link in the email to verify your account. This page will update automatically And the mail will be on spam
           </p>
         )}
 

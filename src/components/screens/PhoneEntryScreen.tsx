@@ -20,6 +20,19 @@ export function PhoneEntryScreen({ onContinue, onBack }: PhoneEntryScreenProps) 
   const phoneDigits = phone.replace(/\D/g, '');
   const isValid = phoneDigits.length >= 10 && email.includes('@') && password.length >= 6;
 
+  const getPasswordStrength = (pwd: string) => {
+    if (!pwd.length) return null;
+    const hasUpper = /[A-Z]/.test(pwd);
+    const hasNumber = /[0-9]/.test(pwd);
+    const hasSpecial = /[^A-Za-z0-9]/.test(pwd);
+    const score = [hasUpper, hasNumber, hasSpecial].filter(Boolean).length;
+    if (pwd.length >= 10 && score >= 2) return { label: 'Strong', bar: 100, barColor: '#22c55e', text: 'text-green-600' };
+    if (pwd.length >= 6 && (pwd.length >= 8 || score >= 1)) return { label: 'Medium', bar: 60, barColor: '#fb923c', text: 'text-orange-500' };
+    return { label: 'Weak', bar: 30, barColor: '#ef4444', text: 'text-red-600' };
+  };
+
+  const strength = password.length > 0 ? getPasswordStrength(password) : null;
+
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const digits = e.target.value.replace(/\D/g, '').slice(0, 10);
     setPhone(digits);
@@ -80,7 +93,7 @@ export function PhoneEntryScreen({ onContinue, onBack }: PhoneEntryScreenProps) 
 
         {/* Password */}
         <div>
-          <label className="block text-sm font-medium text-foreground mb-2">Password</label>
+          <label className="block text-sm font-medium text-foreground mb-2">Create Password</label>
           <div className="relative">
             <Input type={showPassword ? 'text' : 'password'} placeholder="Min. 6 characters"
               value={password} onChange={e => setPassword(e.target.value)} className="h-14 rounded-xl text-base pr-12" />
@@ -91,6 +104,17 @@ export function PhoneEntryScreen({ onContinue, onBack }: PhoneEntryScreenProps) 
           </div>
           {password.length > 0 && password.length < 6 && (
             <p className="text-xs text-destructive mt-1">Password must be at least 6 characters</p>
+          )}
+          {strength && (
+            <div className="mt-2 space-y-1">
+              <div className="w-full h-2 rounded-full bg-muted overflow-hidden">
+                <div
+                  className="h-full rounded-full transition-all duration-300"
+                  style={{ width: `${strength.bar}%`, backgroundColor: strength.barColor }}
+                />
+              </div>
+              <p className={`text-xs font-medium ${strength.text}`}>{strength.label}</p>
+            </div>
           )}
         </div>
       </div>

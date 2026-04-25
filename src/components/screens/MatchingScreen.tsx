@@ -75,6 +75,12 @@ export function MatchingScreen({
         .from('admin_pricing').select('value').eq('key', 'instant_chat_price').single();
       const fee = Number(priceRow?.value) || 99;
 
+      // Cancel any stale searching request for this patient before inserting
+      await supabase.from('consultation_requests')
+        .update({ status: 'cancelled' })
+        .eq('patient_id', user.uid)
+        .eq('status', 'searching');
+
       const { data, error } = await supabase
         .from('consultation_requests')
         .insert({

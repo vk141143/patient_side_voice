@@ -20,7 +20,7 @@ function StatusBadge({ status }: { status: string }) {
 
 function DocViewModal({ doctor, onClose }: { doctor: Doctor; onClose: () => void }) {
   const fields = [
-    ['Full Name', doctor.full_name], ['Email', doctor.email], ['Gender', doctor.gender],
+    ['Full Name', doctor.full_name], ['Email', doctor.email], ['Phone', doctor.phone], ['Gender', doctor.gender],
     ['City', doctor.city], ['State', doctor.state], ['Specialization', doctor.specialization],
     ['Experience', `${doctor.experience_years} years`], ['Practice Type', doctor.practice_type],
     ['Hospital', doctor.hospital_name], ['Clinic Address', doctor.clinic_address],
@@ -266,6 +266,7 @@ export function DoctorsPage() {
                     <div>
                       <p className="text-sm text-white font-medium whitespace-nowrap">{doc.full_name}</p>
                       <p className="text-xs text-gray-500">{doc.email}</p>
+                      {doc.phone && <p className="text-xs text-teal-400">{doc.phone}</p>}
                     </div>
                   </td>
                   <td className="px-4 py-3 text-sm text-teal-400 whitespace-nowrap">{doc.specialization || '—'}</td>

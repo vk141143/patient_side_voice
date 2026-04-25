@@ -92,10 +92,11 @@ function AppContent() {
   const [homeVisitAddress, setHomeVisitAddress] = useState<string>('');
   const [doctorName, setDoctorName] = useState<string>('');
   const [selectedAppointment, setSelectedAppointment] = useState<Appointment | null>(null);
-  const [searchedSpecialty, setSearchedSpecialty] = useState<string>('');
+  const [searchedSpecialty, setSearchedSpecialty] = useState<string>(() => localStorage.getItem('mc_specialty') || '');
+  const updateSearchedSpecialty = (s: string) => { localStorage.setItem('mc_specialty', s); setSearchedSpecialty(s); };
   const [bonusMinutesForChat, setBonusMinutesForChat] = useState<number>(0);
   const [symptomData, setSymptomData] = useState<{ description: string; symptoms: string[]; reportUrl?: string }>({ description: '', symptoms: [] });
-  const [consultMode, setConsultMode] = useState<ConsultMode>('instant');
+  const [consultMode, setConsultMode] = useState<ConsultMode>(() => (localStorage.getItem('mc_consult_mode') as ConsultMode) || 'instant');
   const [chatFee, setChatFee] = useState<number>(0); // actual fee to deduct on session end
   const [consultRequestId, setConsultRequestIdState] = useState<string | null>(() => localStorage.getItem('mc_consult_id'));
   const [chatSessionData, setChatSessionData] = useState<any | null>(null);
@@ -139,8 +140,11 @@ function AppContent() {
       case 'symptoms': return <SymptomsScreen onSubmit={(symptoms, desc, reportUrl, mode) => {
         setSelectedSymptoms(symptoms);
         setSearchedSpecialty(symptoms[0] || 'General Physician');
+        // persist so refresh doesn't lose specialty
+        localStorage.setItem('mc_specialty', symptoms[0] || 'General Physician');
         setSymptomData(prev => ({ ...prev, description: desc ?? '', reportUrl }));
         setConsultMode(mode ?? 'instant');
+        localStorage.setItem('mc_consult_mode', mode ?? 'instant');
         setCurrentScreen(mode === 'available' ? 'available-doctors' : 'matching');
       }} onBack={() => setCurrentScreen('home')} />;
       case 'matching': return <MatchingScreen symptoms={selectedSymptoms} description={symptomData.description} reportUrl={symptomData.reportUrl} consultMode={consultMode} onMatched={async (reqId, doctorId, sessionData) => {
@@ -157,7 +161,7 @@ function AppContent() {
         } else {
           setCurrentScreen('available-doctors');
         }
-      }} onCancel={() => setCurrentScreen('home')} onBrowseDoctors={(reqId) => { setConsultRequestId(reqId); setCurrentScreen('available-doctors'); }} />;
+      }} onCancel={() => setCurrentScreen('symptoms')} onBrowseDoctors={(reqId) => { setConsultRequestId(reqId); setCurrentScreen('available-doctors'); }} />;
       case 'available-doctors': return <AvailableDoctorsScreen specialty={searchedSpecialty} description={symptomData.description} requestId={consultRequestId ?? undefined} walletBalance={walletBalance} onRecharge={handleRecharge} onSelectDoctor={async (doctor, callType) => {
         // Fetch the actual fee stored in the consultation_request
         const { data: reqRow } = await supabase.from('consultation_requests')
@@ -228,6 +232,7 @@ function AppContent() {
         };
         setCurrentDoctor(chatDoctor as any);
         setSearchedSpecialty(doctor.specialization ?? '');
+        localStorage.setItem('mc_specialty', doctor.specialization ?? '');
 
         if (existingSessionId) {
           // Reopen existing session — wait for DB write before ChatScreen polls
@@ -266,7 +271,7 @@ function AppContent() {
 
       // Other main screens
       case 'records': return <RecordsScreen onBack={() => setCurrentScreen('home')} onViewPrescription={() => setCurrentScreen('prescription')} />;
-      case 'user-profile': return <UserProfileScreen user={user} onBack={() => setCurrentScreen('home')} onEditProfile={() => setCurrentScreen('profile')} onLogout={async () => { const { logout } = await import('@/services/auth'); await logout(); localStorage.removeItem('mc_screen'); localStorage.removeItem('mc_user'); localStorage.removeItem('mc_wallet'); setCurrentScreen('welcome'); }} onDoctorRegister={() => setCurrentScreen('doctor-welcome')} />;
+      case 'user-profile': return <UserProfileScreen user={user} onBack={() => setCurrentScreen('home')} onEditProfile={() => setCurrentScreen('profile')} onLogout={async () => { const { logout } = await import('@/services/auth'); await logout(); localStorage.removeItem('mc_screen'); localStorage.removeItem('mc_user'); localStorage.removeItem('mc_wallet'); localStorage.removeItem('mc_specialty'); localStorage.removeItem('mc_consult_mode'); setCurrentScreen('welcome'); }} onDoctorRegister={() => setCurrentScreen('doctor-welcome')} />;
       case 'user-notifications': return <UserNotificationsScreen onBack={() => setCurrentScreen('home')} />;
       case 'payment': return <PaymentScreen consultationFee={299} onPaymentComplete={() => setCurrentScreen('symptoms')} onBack={() => setCurrentScreen('home')} />;
       case 'pharmacy-selection': return <PharmacySelectionScreen prescription={currentPrescription!} onSendToPharmacy={() => setCurrentScreen('order-confirmation')} onBack={() => setCurrentScreen('prescription')} />;

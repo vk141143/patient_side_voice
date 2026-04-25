@@ -86,9 +86,10 @@ function MeetingView({ onLeave, doctorName }: { onLeave: () => void; doctorName:
     onError: (data: any) => console.error('[VideoCall] meeting error:', data),
   });
 
-  // Join the meeting on mount
+  // Join the meeting on mount — delay gives MeetingProvider time to fully initialize
   useEffect(() => {
-    join();
+    const t = setTimeout(() => join(), 800);
+    return () => clearTimeout(t);
   }, []);
 
   const handleToggleMic = () => { toggleMic(); setMicOn(p => !p); };

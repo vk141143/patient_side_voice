@@ -27,48 +27,67 @@ export function AvailableDoctorsScreen({
   const [waitingRequestId, setWaitingRequestId] = useState<string | null>(null);
   const [waitCountdown, setWaitCountdown] = useState(30);
   const [rejected, setRejectedDoctor] = useState<string | null>(null);
-  const [chatPrice, setChatPrice] = useState(299);
-  const [videoPrice, setVideoPrice] = useState(499);
+  const [defaultChatPrice, setDefaultChatPrice] = useState(299);
+  const [defaultVideoPrice, setDefaultVideoPrice] = useState(499);
+  const [doctorPricing, setDoctorPricing] = useState<Record<string, { chat: number; video: number }>>({});
 
   useEffect(() => {
-    const loadPrices = async () => {
-      const { data } = await supabase.from('admin_pricing').select('key, value')
+    const load = async () => {
+      // 1. Fetch admin default prices
+      const { data: adminPrices } = await supabase.from('admin_pricing').select('key, value')
         .in('key', ['available_chat_price', 'available_video_price']);
-      data?.forEach(row => {
-        if (row.key === 'available_chat_price') setChatPrice(Number(row.value) || 299);
-        if (row.key === 'available_video_price') setVideoPrice(Number(row.value) || 499);
+      let defChat = 299, defVideo = 499;
+      adminPrices?.forEach(row => {
+        if (row.key === 'available_chat_price') defChat = Number(row.value) || 299;
+        if (row.key === 'available_video_price') defVideo = Number(row.value) || 499;
       });
+      setDefaultChatPrice(defChat);
+      setDefaultVideoPrice(defVideo);
+
+      // 2. Fetch all doctors — filter client-side to avoid PostgREST 400 on status column
+      const { data, error } = await supabase.from('doctors')
+        .select('firebase_uid, full_name, specialization, experience_years, selfie_url, chat_enabled, is_online, service_chat, service_opd, status');
+      if (error) { console.error('[AvailableDoctors] fetch error:', error); setLoading(false); return; }
+
+      const approved = (data ?? []).filter(d => d.status === 'approved');
+      const specLower = specialty.toLowerCase().trim();
+      const matched = specLower
+        ? approved.filter(d => d.specialization?.toLowerCase().trim() === specLower)
+        : approved;
+      setDoctors(matched);
+      setLoading(false);
+
+      // 3. Fetch per-doctor pricing for matched doctors
+      if (matched.length > 0) {
+        const ids = matched.map(d => d.firebase_uid);
+        const { data: pricingRows } = await supabase.from('doctor_pricing')
+          .select('doctor_id, chat_price, video_price')
+          .in('doctor_id', ids);
+        const map: Record<string, { chat: number; video: number }> = {};
+        pricingRows?.forEach(p => { map[p.doctor_id] = { chat: p.chat_price, video: p.video_price }; });
+        setDoctorPricing(map);
+      }
     };
-    loadPrices();
+    load();
 
-    // Realtime: fires whenever admin saves a price
     const pricingChannel = supabase.channel('pricing_available_doctors')
-      .on('postgres_changes',
-        { event: '*', schema: 'public', table: 'admin_pricing' },
-        (payload) => {
-          const row = payload.new as any;
-          if (row.key === 'available_chat_price') setChatPrice(Number(row.value) || 299);
-          if (row.key === 'available_video_price') setVideoPrice(Number(row.value) || 499);
-        })
-      .subscribe();
-
-    // Fetch online doctors
-    supabase.from('doctors')
-      .select('firebase_uid, full_name, specialization, experience_years, selfie_url, chat_enabled, is_online, service_chat, service_video')
-      .eq('status', 'approved')
-      .eq('is_online', true)
-      .eq('chat_enabled', true)
-      .ilike('specialization', `%${specialty}%`)
-      .then(({ data }) => { setDoctors(data ?? []); setLoading(false); });
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'admin_pricing' }, (payload) => {
+        const row = payload.new as any;
+        if (row.key === 'available_chat_price') setDefaultChatPrice(Number(row.value) || 299);
+        if (row.key === 'available_video_price') setDefaultVideoPrice(Number(row.value) || 499);
+      }).subscribe();
 
     return () => { supabase.removeChannel(pricingChannel); };
   }, [specialty]);
+
+  const getDoctorChatPrice = (uid: string) => doctorPricing[uid]?.chat ?? defaultChatPrice;
+  const getDoctorVideoPrice = (uid: string) => doctorPricing[uid]?.video ?? defaultVideoPrice;
 
   const handleRequest = async (doctor: any, callType: 'chat' | 'video') => {
     const user = getCurrentUser();
     if (!user) return;
 
-    const fee = callType === 'chat' ? chatPrice : videoPrice;
+    const fee = callType === 'chat' ? getDoctorChatPrice(doctor.firebase_uid) : getDoctorVideoPrice(doctor.firebase_uid);
     if (walletBalance < fee) { setShowWallet(true); return; }
 
     setRequestingDoctor(doctor.firebase_uid);
@@ -165,7 +184,7 @@ export function AvailableDoctorsScreen({
           </button>
           <div>
             <h1 className="text-lg font-semibold text-foreground">Available Doctors</h1>
-            <p className="text-sm text-muted-foreground">{specialty} · {doctors.length} online</p>
+            <p className="text-sm text-muted-foreground">{specialty} · {doctors.length} doctor{doctors.length !== 1 ? 's' : ''}</p>
           </div>
         </div>
         <button onClick={() => setShowWallet(true)} className="flex items-center gap-1.5 bg-primary/10 border border-primary/20 rounded-full px-3 py-1.5">
@@ -180,14 +199,14 @@ export function AvailableDoctorsScreen({
           <MessageSquare className="w-4 h-4 text-primary" />
           <div>
             <p className="text-[10px] text-muted-foreground">Chat · 10 min</p>
-            <p className="text-sm font-bold text-foreground">₹{chatPrice}</p>
+            <p className="text-sm font-bold text-foreground">from ₹{defaultChatPrice}</p>
           </div>
         </div>
         <div className="flex items-center gap-2 flex-1 bg-card rounded-xl px-3 py-2 border border-border">
           <Video className="w-4 h-4 text-blue-500" />
           <div>
             <p className="text-[10px] text-muted-foreground">Video · 10 min</p>
-            <p className="text-sm font-bold text-foreground">₹{videoPrice}</p>
+            <p className="text-sm font-bold text-foreground">from ₹{defaultVideoPrice}</p>
           </div>
         </div>
       </div>
@@ -199,8 +218,8 @@ export function AvailableDoctorsScreen({
           </div>
         ) : doctors.length === 0 ? (
           <div className="text-center py-16">
-            <p className="font-medium text-foreground">No doctors online right now</p>
-            <p className="text-sm text-muted-foreground mt-1">Try again in a few minutes</p>
+            <p className="font-medium text-foreground">No {specialty} doctors found</p>
+            <p className="text-sm text-muted-foreground mt-1">Try a different specialty</p>
           </div>
         ) : doctors.map(doctor => {
           const isRequesting = requestingDoctor === doctor.firebase_uid;
@@ -230,8 +249,15 @@ export function AvailableDoctorsScreen({
                     <span className="text-sm text-muted-foreground">{doctor.experience_years} yrs exp</span>
                   </div>
                   <div className="flex items-center gap-1.5">
-                    <div className="w-2 h-2 rounded-full bg-green-500" />
-                    <span className="text-xs font-medium text-green-600">Online now</span>
+                    <div className={`w-2 h-2 rounded-full ${doctor.is_online ? 'bg-green-500' : 'bg-gray-400'}`} />
+                    <span className={`text-xs font-medium ${doctor.is_online ? 'text-green-600' : 'text-muted-foreground'}`}>
+                      {doctor.is_online ? 'Online now' : 'Offline'}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2 mt-1">
+                    <span className="text-xs text-muted-foreground">Chat · ₹{getDoctorChatPrice(doctor.firebase_uid)}</span>
+                    <span className="text-muted-foreground">·</span>
+                    <span className="text-xs text-muted-foreground">Video · ₹{getDoctorVideoPrice(doctor.firebase_uid)}</span>
                   </div>
                 </div>
               </div>
@@ -263,32 +289,32 @@ export function AvailableDoctorsScreen({
               ) : (
                 <div className="grid grid-cols-2 gap-2">
                   {/* Chat button */}
-                  {walletBalance >= chatPrice ? (
+                  {walletBalance >= getDoctorChatPrice(doctor.firebase_uid) ? (
                     <button onClick={() => handleRequest(doctor, 'chat')}
                       className="flex items-center justify-center gap-2 py-3 rounded-xl bg-primary text-primary-foreground font-semibold text-sm hover:bg-primary/90 transition-colors">
                       <MessageSquare className="w-4 h-4" />
-                      Chat · ₹{chatPrice}
+                      Chat · ₹{getDoctorChatPrice(doctor.firebase_uid)}
                     </button>
                   ) : (
                     <button onClick={() => setShowWallet(true)}
                       className="flex items-center justify-center gap-2 py-3 rounded-xl border-2 border-dashed border-border text-muted-foreground text-sm hover:border-primary transition-colors">
                       <AlertCircle className="w-4 h-4" />
-                      ₹{chatPrice}
+                      ₹{getDoctorChatPrice(doctor.firebase_uid)}
                     </button>
                   )}
 
                   {/* Video button */}
-                  {walletBalance >= videoPrice ? (
+                  {walletBalance >= getDoctorVideoPrice(doctor.firebase_uid) ? (
                     <button onClick={() => handleRequest(doctor, 'video')}
                       className="flex items-center justify-center gap-2 py-3 rounded-xl bg-blue-500 text-white font-semibold text-sm hover:bg-blue-600 transition-colors">
                       <Video className="w-4 h-4" />
-                      Video · ₹{videoPrice}
+                      Video · ₹{getDoctorVideoPrice(doctor.firebase_uid)}
                     </button>
                   ) : (
                     <button onClick={() => setShowWallet(true)}
                       className="flex items-center justify-center gap-2 py-3 rounded-xl border-2 border-dashed border-border text-muted-foreground text-sm hover:border-blue-400 transition-colors">
                       <Video className="w-4 h-4" />
-                      ₹{videoPrice}
+                      ₹{getDoctorVideoPrice(doctor.firebase_uid)}
                     </button>
                   )}
                 </div>
