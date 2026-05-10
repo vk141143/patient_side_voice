@@ -11,7 +11,7 @@ interface AvailableDoctorsScreenProps {
   requestId?: string;
   walletBalance: number;
   onRecharge: (amount: number) => void;
-  onSelectDoctor: (doctor: any, callType: 'chat' | 'video') => void;
+  onSelectDoctor: (doctor: any, callType: 'chat' | 'video', requestId?: string) => void;
   onBack: () => void;
 }
 
@@ -141,7 +141,7 @@ export function AvailableDoctorsScreen({
         clearInterval(timer);
         clearInterval(poll);
         setRequestingDoctor(null);
-        onSelectDoctor(doctor, callType);
+        onSelectDoctor(doctor, callType, reqId!);
       } else if (updated?.status === 'rejected') {
         clearInterval(timer);
         clearInterval(poll);
@@ -159,7 +159,7 @@ export function AvailableDoctorsScreen({
         clearInterval(timer); clearInterval(poll);
         if (updated.status === 'accepted') {
           setRequestingDoctor(null);
-          onSelectDoctor(doctor, callType);
+          onSelectDoctor(doctor, callType, reqId!);
         } else if (updated.status === 'rejected') {
           setRequestingDoctor(null);
           setWaitingRequestId(null);
@@ -193,23 +193,6 @@ export function AvailableDoctorsScreen({
         </button>
       </div>
 
-      {/* Price info bar */}
-      <div className="flex gap-3 px-4 py-3 bg-secondary/50 border-b border-border">
-        <div className="flex items-center gap-2 flex-1 bg-card rounded-xl px-3 py-2 border border-border">
-          <MessageSquare className="w-4 h-4 text-primary" />
-          <div>
-            <p className="text-[10px] text-muted-foreground">Chat · 10 min</p>
-            <p className="text-sm font-bold text-foreground">from ₹{defaultChatPrice}</p>
-          </div>
-        </div>
-        <div className="flex items-center gap-2 flex-1 bg-card rounded-xl px-3 py-2 border border-border">
-          <Video className="w-4 h-4 text-blue-500" />
-          <div>
-            <p className="text-[10px] text-muted-foreground">Video · 10 min</p>
-            <p className="text-sm font-bold text-foreground">from ₹{defaultVideoPrice}</p>
-          </div>
-        </div>
-      </div>
 
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
         {loading ? (

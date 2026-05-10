@@ -162,11 +162,31 @@ function AppContent() {
           setCurrentScreen('available-doctors');
         }
       }} onCancel={() => setCurrentScreen('symptoms')} onBrowseDoctors={(reqId) => { setConsultRequestId(reqId); setCurrentScreen('available-doctors'); }} />;
-      case 'available-doctors': return <AvailableDoctorsScreen specialty={searchedSpecialty} description={symptomData.description} requestId={consultRequestId ?? undefined} walletBalance={walletBalance} onRecharge={handleRecharge} onSelectDoctor={async (doctor, callType) => {
+      case 'available-doctors': return <AvailableDoctorsScreen specialty={searchedSpecialty} description={symptomData.description} requestId={consultRequestId ?? undefined} walletBalance={walletBalance} onRecharge={handleRecharge} onSelectDoctor={async (doctor, callType, acceptedRequestId) => {
+        // Use the accepted request ID passed from AvailableDoctorsScreen
+        if (acceptedRequestId) setConsultRequestId(acceptedRequestId);
+
         // Fetch the actual fee stored in the consultation_request
-        const { data: reqRow } = await supabase.from('consultation_requests')
-          .select('fee').eq('doctor_id', doctor.firebase_uid).eq('status', 'accepted').order('created_at', { ascending: false }).limit(1).single();
-        setChatFee(Number(reqRow?.fee) || 0);
+        const reqId = acceptedRequestId ?? consultRequestId;
+        if (reqId) {
+          const { data: reqRow } = await supabase.from('consultation_requests')
+            .select('fee').eq('id', reqId).single();
+          setChatFee(Number(reqRow?.fee) || 0);
+        }
+
+        // Wait for doctor to create the chat_session (poll up to 10s)
+        let sessionData = null;
+        const reqId2 = acceptedRequestId ?? consultRequestId;
+        if (reqId2) {
+          for (let i = 0; i < 10; i++) {
+            const { data: sess } = await supabase.from('chat_sessions')
+              .select('*').eq('consultation_id', reqId2).maybeSingle();
+            if (sess) { sessionData = sess; break; }
+            await new Promise(r => setTimeout(r, 1000));
+          }
+        }
+        setChatSessionData(sessionData);
+
         const chatDoctor = {
           id: doctor.firebase_uid ?? doctor.id,
           name: doctor.full_name ?? doctor.name,
@@ -181,14 +201,22 @@ function AppContent() {
           selfie_url: doctor.selfie_url,
         };
         setCurrentDoctor(chatDoctor as any);
-        setCurrentScreen('chat');
+
+        if (callType === 'video' && sessionData?.id) {
+          setVideoCallSessionId(sessionData.id);
+          setCurrentScreen('video-call');
+        } else {
+          setCurrentScreen('chat');
+        }
       }} onBack={() => setCurrentScreen(consultMode === 'available' ? 'symptoms' : 'matching')} />;
-      case 'chat': return currentDoctor ? <ChatScreen doctor={currentDoctor} sessionData={chatSessionData ?? undefined} consultationId={consultRequestId ?? undefined} consultationFee={chatFee} initialBonusMinutes={bonusMinutesForChat} onVideoCall={(vcSessionId) => { setVideoCallSessionId(vcSessionId); setCurrentScreen('video-call'); }} onEndSession={async (rxId?: string, passedSessionId?: string) => {
+      case 'chat': return currentDoctor ? <ChatScreen doctor={currentDoctor} sessionData={chatSessionData ?? undefined} consultationId={consultRequestId ?? undefined} consultationFee={chatFee} initialBonusMinutes={bonusMinutesForChat} sessionDuration={consultMode === 'available' ? 600 : 120} onVideoCall={(vcSessionId) => { setVideoCallSessionId(vcSessionId); setCurrentScreen('video-call'); }} onEndSession={async (rxId?: string, passedSessionId?: string) => {
+        // Resolve session ID from all possible sources
+        const sid = passedSessionId ?? chatSessionData?.id ?? null;
+
         if (rxId) {
           setChatRxId(rxId);
         } else {
-          // Doctor ended — fetch prescription by session_id
-          const sid = passedSessionId ?? chatSessionData?.id ?? null;
+          // Doctor ended — find prescription by session_id
           let resolvedSid = sid;
           if (!resolvedSid && consultRequestId) {
             const { data: sess } = await supabase.from('chat_sessions')
@@ -196,9 +224,15 @@ function AppContent() {
             resolvedSid = sess?.id ?? null;
           }
           if (resolvedSid) {
-            const { data: rxRow } = await supabase.from('chat_prescriptions')
-              .select('id').eq('session_id', resolvedSid)
-              .order('created_at', { ascending: false }).limit(1).maybeSingle();
+            // Poll up to 5s for prescription to be written by doctor
+            let rxRow = null;
+            for (let i = 0; i < 5; i++) {
+              const { data } = await supabase.from('chat_prescriptions')
+                .select('id').eq('session_id', resolvedSid)
+                .order('created_at', { ascending: false }).limit(1).maybeSingle();
+              if (data?.id) { rxRow = data; break; }
+              await new Promise(r => setTimeout(r, 1000));
+            }
             if (rxRow?.id) setChatRxId(rxRow.id);
           }
         }
@@ -270,7 +304,7 @@ function AppContent() {
       }} />;
 
       // Other main screens
-      case 'records': return <RecordsScreen onBack={() => setCurrentScreen('home')} onViewPrescription={() => setCurrentScreen('prescription')} />;
+      case 'records': return <RecordsScreen onBack={() => setCurrentScreen('home')} onViewPrescription={() => setCurrentScreen('prescription')} onViewRx={(rxId) => { setChatRxId(rxId); setCurrentScreen('prescription'); }} />;
       case 'user-profile': return <UserProfileScreen user={user} onBack={() => setCurrentScreen('home')} onEditProfile={() => setCurrentScreen('profile')} onLogout={async () => { const { logout } = await import('@/services/auth'); await logout(); localStorage.removeItem('mc_screen'); localStorage.removeItem('mc_user'); localStorage.removeItem('mc_wallet'); localStorage.removeItem('mc_specialty'); localStorage.removeItem('mc_consult_mode'); setCurrentScreen('welcome'); }} onDoctorRegister={() => setCurrentScreen('doctor-welcome')} />;
       case 'user-notifications': return <UserNotificationsScreen onBack={() => setCurrentScreen('home')} />;
       case 'payment': return <PaymentScreen consultationFee={299} onPaymentComplete={() => setCurrentScreen('symptoms')} onBack={() => setCurrentScreen('home')} />;

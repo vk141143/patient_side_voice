@@ -10,7 +10,7 @@ import { saveMessages, getMessages, getLastMessageTime, appendMessage, clearSess
 interface ChatScreenProps {
   doctor: Doctor;
   sessionId?: string;
-  sessionData?: any;       // full chat_sessions row passed from MatchingScreen
+  sessionData?: any;
   consultationId?: string;
   messages?: any[];
   onSendMessage?: (text: string) => void;
@@ -21,6 +21,7 @@ interface ChatScreenProps {
   currentPrescription?: Prescription | null;
   consultationFee?: number;
   initialBonusMinutes?: number;
+  sessionDuration?: number; // in seconds — 120 for instant, 600 for available
 }
 
 const EXTEND_OPTIONS = [
@@ -33,13 +34,13 @@ const EXTEND_OPTIONS = [
 export function ChatScreen({
   doctor, sessionId: propSessionId, sessionData, consultationId,
   onEndSession, onBack, onDownloadPrescription, onVideoCall,
-  consultationFee = 0, initialBonusMinutes = 0,
+  consultationFee = 0, initialBonusMinutes = 0, sessionDuration = 120,
 }: ChatScreenProps) {
   const { walletBalance, deductWallet } = useApp();
   const [messages, setMessages] = useState<any[]>([]);
   const [input, setInput] = useState('');
   const [sessionId, setSessionId] = useState<string | null>(propSessionId ?? sessionData?.id ?? null);
-  const [sessionTime, setSessionTime] = useState(120 + initialBonusMinutes * 60);
+  const [sessionTime, setSessionTime] = useState(sessionDuration + initialBonusMinutes * 60);
   const [showEndConfirm, setShowEndConfirm] = useState(false);
   const [showAttach, setShowAttach] = useState(false);
   const [showExtend, setShowExtend] = useState(false);
@@ -158,7 +159,7 @@ export function ChatScreen({
               typingTimeoutRef.current = setTimeout(() => setDoctorTyping(false), 3000);
               return;
             } else if (msg.content?.startsWith('__video_call__:') && msg.sender_role === 'doctor') {
-              // Doctor is inviting patient to video call
+              // Doctor is inviting patient to video call — show popup, do NOT auto-navigate
               const vcSessionId = msg.content.split(':')[1];
               setVideoCallSessionId(vcSessionId);
               setShowVideoConfirm(true);
@@ -907,7 +908,7 @@ export function ChatScreen({
       {showVideoConfirm && onVideoCall && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center px-4" style={{ background: 'rgba(0,0,0,0.8)' }}>
           <div className="bg-background rounded-2xl p-6 text-center w-full max-w-sm shadow-2xl">
-            <div className="w-16 h-16 rounded-full bg-blue-100 flex items-center justify-center mx-auto mb-4">
+            <div className="w-16 h-16 rounded-full bg-blue-100 flex items-center justify-center mx-auto mb-4 animate-pulse">
               <Video className="w-8 h-8 text-blue-500" />
             </div>
             <h2 className="text-lg font-bold text-foreground mb-2">Video Call Invitation</h2>

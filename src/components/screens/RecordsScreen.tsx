@@ -8,6 +8,7 @@ import { getCurrentUser } from '@/services/auth';
 interface RecordsScreenProps {
   onBack: () => void;
   onViewPrescription: (prescription: Prescription) => void;
+  onViewRx?: (rxId: string) => void;
 }
 
 const tabs = [
@@ -16,7 +17,7 @@ const tabs = [
   { id: 'consultations', label: 'History',        icon: MessageSquare },
 ];
 
-export function RecordsScreen({ onBack, onViewPrescription }: RecordsScreenProps) {
+export function RecordsScreen({ onBack, onViewPrescription, onViewRx }: RecordsScreenProps) {
   const [activeTab, setActiveTab] = useState('consultations');
   const [consultations, setConsultations] = useState<any[]>([]);
   const [prescriptions, setPrescriptions] = useState<any[]>([]);
@@ -88,14 +89,29 @@ export function RecordsScreen({ onBack, onViewPrescription }: RecordsScreenProps
 
       setConsultations(all);
 
-      // Prescriptions from chat_prescriptions
-      const { data: rxList } = await supabase
+      // Prescriptions from chat_prescriptions — join via session_ids owned by this patient
+      const sessionIds = (sessions ?? []).map(s => s.id);
+      let rxList: any[] = [];
+      if (sessionIds.length > 0) {
+        const { data: rxBySession } = await supabase
+          .from('chat_prescriptions')
+          .select('id, doctor_name, doctor_specialty, diagnosis, created_at, session_id')
+          .in('session_id', sessionIds)
+          .order('created_at', { ascending: false });
+        rxList = rxBySession ?? [];
+      }
+      // Also try patient_id column if it exists
+      const { data: rxByPatient } = await supabase
         .from('chat_prescriptions')
-        .select('id, doctor_name, doctor_specialty, diagnosis, created_at')
+        .select('id, doctor_name, doctor_specialty, diagnosis, created_at, session_id')
         .eq('patient_id', user.uid)
         .order('created_at', { ascending: false });
+      // Merge and deduplicate by id
+      const allRx = [...rxList, ...(rxByPatient ?? [])];
+      const seen = new Set<string>();
+      const dedupedRx = allRx.filter(r => { if (seen.has(r.id)) return false; seen.add(r.id); return true; });
 
-      setPrescriptions(rxList ?? []);
+      setPrescriptions(dedupedRx);
       setLoading(false);
     };
 
@@ -217,7 +233,11 @@ export function RecordsScreen({ onBack, onViewPrescription }: RecordsScreenProps
                       {new Date(rx.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
                     </p>
                   </div>
-                  <Button variant="ghost" size="sm"><Download className="w-4 h-4" /></Button>
+                  {onViewRx && (
+                    <Button variant="ghost" size="sm" onClick={() => onViewRx(rx.id)}>
+                      <ChevronRight className="w-4 h-4" />
+                    </Button>
+                  )}
                 </div>
               </div>
             ))}
