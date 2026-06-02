@@ -1,5 +1,6 @@
 export type AppScreen = 
   | 'welcome'
+  | 'privacy-consent'
   | 'auth-choice'
   | 'login'
   | 'phone-entry'

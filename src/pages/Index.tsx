@@ -54,6 +54,7 @@ import { DoctorLegalConsentScreen } from '@/components/screens/doctor-registrati
 import { DoctorVerificationStatusScreen } from '@/components/screens/doctor-registration/DoctorVerificationStatusScreen';
 import { DoctorApprovalSuccessScreen } from '@/components/screens/doctor-registration/DoctorApprovalSuccessScreen';
 import { BottomNav } from '@/components/BottomNav';
+import { PrivacyConsentScreen, hasAcceptedConsent } from '@/components/screens/PrivacyConsentScreen';
 import { Doctor, Hospital, ConsultationType, Specialty, Appointment } from '@/types/app';
 import { supabase } from '@/lib/supabase';
 import { format } from 'date-fns';
@@ -111,6 +112,16 @@ function AppContent() {
   const handleRecharge = async (amt: number) => {
     await addToWallet(amt);
   };
+
+  const [consentGiven, setConsentGiven] = useState(() => hasAcceptedConsent());
+
+  if (!consentGiven) {
+    return (
+      <div className="max-w-md mx-auto bg-background min-h-screen relative">
+        <PrivacyConsentScreen onAccept={() => setConsentGiven(true)} />
+      </div>
+    );
+  }
 
   const showBottomNav = ['home', 'bookings', 'records', 'prescription', 'user-profile'].includes(currentScreen);
   const TOTAL_DOCTOR_REG_STEPS = 7;

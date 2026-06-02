@@ -3,6 +3,7 @@ import { AppScreen, UserProfile, Doctor, Message, Consultation, Prescription, Ap
 import { supabase } from '@/lib/supabase';
 import { onAuthChange } from '@/services/auth';
 import { getCurrentUser } from '@/services/auth';
+import { encryptPHI, decryptPHI } from '@/lib/crypto';
 import { Star, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
@@ -10,7 +11,7 @@ interface AppContextType {
   currentScreen: AppScreen;
   setCurrentScreen: (screen: AppScreen) => void;
   user: UserProfile;
-  setUser: (user: UserProfile) => void;
+  setUser: (user: UserProfile) => void | Promise<void>;
   userLocation: { lat: number; lng: number; city?: string } | null;
   setUserLocation: (loc: { lat: number; lng: number; city?: string } | null) => void;
   selectedSymptoms: string[];
@@ -152,9 +153,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [user, setUserState] = useState<UserProfile>(() => {
     try {
       const saved = localStorage.getItem('mc_user');
+      // Legacy plaintext fallback — will be re-encrypted on next setUser call
       return saved ? JSON.parse(saved) : { name: '', age: '', gender: '', phone: '' };
     } catch { return { name: '', age: '', gender: '', phone: '' }; }
   });
+
+  // Async load — decrypt PHI from localStorage on mount
+  useEffect(() => {
+    (async () => {
+      const saved = localStorage.getItem('mc_user_enc');
+      if (!saved) return;
+      try {
+        const decrypted = await decryptPHI(saved);
+        setUserState(JSON.parse(decrypted));
+      } catch { /* ignore */ }
+    })();
+  }, []);
 
   const setCurrentScreen = (screen: AppScreen) => {
     // Don't persist auth/onboarding screens — always restart those fresh
@@ -167,8 +181,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setCurrentScreenState(screen);
   };
 
-  const setUser = (u: UserProfile) => {
-    localStorage.setItem('mc_user', JSON.stringify(u));
+  const setUser = async (u: UserProfile) => {
+    const encrypted = await encryptPHI(JSON.stringify(u));
+    localStorage.setItem('mc_user_enc', encrypted);
+    localStorage.removeItem('mc_user'); // remove legacy plaintext
     setUserState(u);
   };
   const [selectedSymptoms, setSelectedSymptoms] = useState<string[]>([]);
@@ -235,19 +251,29 @@ export function AppProvider({ children }: { children: ReactNode }) {
     localStorage.setItem('mc_wallet', String(newBal));
   };
 
-  const [appointments, setAppointments] = useState<Appointment[]>(() => {
-    try {
-      const saved = localStorage.getItem('mc_appointments');
-      if (!saved) return [];
-      const parsed = JSON.parse(saved);
-      return parsed.map((a: Appointment) => ({ ...a, date: new Date(a.date) }));
-    } catch { return []; }
-  });
+  const [appointments, setAppointments] = useState<Appointment[]>([]);
 
-  const addAppointment = (apt: Appointment) => {
+  // Async load — decrypt appointments PHI from localStorage on mount
+  useEffect(() => {
+    (async () => {
+      const enc = localStorage.getItem('mc_appointments_enc');
+      const legacy = localStorage.getItem('mc_appointments');
+      const raw = enc ? await decryptPHI(enc).catch(() => null) : legacy;
+      if (!raw) return;
+      try {
+        const parsed = JSON.parse(raw);
+        setAppointments(parsed.map((a: Appointment) => ({ ...a, date: new Date(a.date) })));
+      } catch { /* ignore */ }
+    })();
+  }, []);
+
+  const addAppointment = async (apt: Appointment) => {
     setAppointments(prev => {
       const updated = [apt, ...prev.filter(a => a.id !== apt.id)];
-      localStorage.setItem('mc_appointments', JSON.stringify(updated));
+      encryptPHI(JSON.stringify(updated)).then(enc =>
+        localStorage.setItem('mc_appointments_enc', enc)
+      );
+      localStorage.removeItem('mc_appointments'); // remove legacy plaintext
       return updated;
     });
   };
@@ -255,7 +281,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const cancelAppointment = (id: string) => {
     setAppointments(prev => {
       const updated = prev.map(a => a.id === id ? { ...a, status: 'cancelled' as const } : a);
-      localStorage.setItem('mc_appointments', JSON.stringify(updated));
+      encryptPHI(JSON.stringify(updated)).then(enc =>
+        localStorage.setItem('mc_appointments_enc', enc)
+      );
       return updated;
     });
   };

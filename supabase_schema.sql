@@ -1,5 +1,5 @@
 -- Run this SQL in your Supabase SQL Editor
--- Go to: https://supabase.com/dashboard/project/rbiskypizusqrlrkfzpc/sql
+-- HIPAA-compliant RLS policies — users can only access their own row
 
 CREATE TABLE IF NOT EXISTS users (
   id              TEXT PRIMARY KEY,          -- Firebase UID
@@ -19,18 +19,26 @@ CREATE TABLE IF NOT EXISTS users (
 -- Enable Row Level Security
 ALTER TABLE users ENABLE ROW LEVEL SECURITY;
 
--- Allow users to read/update only their own row
+-- Drop old insecure policies if they exist
+DROP POLICY IF EXISTS "Users can read own data" ON users;
+DROP POLICY IF EXISTS "Users can insert own data" ON users;
+DROP POLICY IF EXISTS "Users can update own data" ON users;
+
+-- HIPAA: Users can only read their own row (Firebase UID must match)
 CREATE POLICY "Users can read own data"
   ON users FOR SELECT
-  USING (true);
+  USING (auth.uid()::text = id);
 
+-- HIPAA: Users can only insert their own row
 CREATE POLICY "Users can insert own data"
   ON users FOR INSERT
-  WITH CHECK (true);
+  WITH CHECK (auth.uid()::text = id);
 
+-- HIPAA: Users can only update their own row
 CREATE POLICY "Users can update own data"
   ON users FOR UPDATE
-  USING (true);
+  USING (auth.uid()::text = id)
+  WITH CHECK (auth.uid()::text = id);
 
 -- Function to increment bonus minutes atomically
 CREATE OR REPLACE FUNCTION increment_bonus_minutes(user_id TEXT, minutes INTEGER)

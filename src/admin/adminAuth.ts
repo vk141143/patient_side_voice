@@ -19,22 +19,14 @@ export async function adminLogin(
     .eq('email', email.toLowerCase().trim())
     .maybeSingle();
 
-  console.log('Admin login attempt:', email, 'DB result:', data, 'error:', error);
-
   if (error || !data) return { admin: null, error: 'Invalid email or password.' };
 
-  // Try bcrypt compare first
   let valid = false;
   try {
     valid = await bcrypt.compare(password, data.password_hash);
   } catch (e) {
     console.error('bcrypt error:', e);
   }
-
-  // Fallback: plain text compare (for dev)
-  if (!valid && data.password_hash === password) valid = true;
-
-  console.log('Password valid:', valid);
 
   if (!valid) return { admin: null, error: 'Invalid email or password.' };
 
