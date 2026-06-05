@@ -1,8 +1,9 @@
 import { Button } from '@/components/ui/button';
-import { Bell, Wallet, Clock, MessageSquare, Heart, ChevronRight, CalendarCheck, Gift, HelpCircle, Hospital } from 'lucide-react';
+import { Bell, Wallet, Clock, MessageSquare, Heart, ChevronRight, CalendarCheck, Gift, HelpCircle, Hospital, Mic } from 'lucide-react';
 import { UserProfile } from '@/types/app';
 import { useState, useEffect } from 'react';
 import { WalletRechargeModal } from '@/components/WalletRechargeModal';
+import { VoiceAssistantModal } from '@/components/screens/VoiceAssistantModal';
 import { supabase } from '@/lib/supabase';
 import { getCurrentUser } from '@/services/auth';
 
@@ -24,11 +25,12 @@ function RecentConsultations({ onConsultAgain }: { onConsultAgain: () => void })
         .order('started_at', { ascending: false })
         .limit(2);
 
-      // Fetch last 2 OPD appointments
+      // Fetch last 2 OPD appointments by Firebase UID only.
+      // The patient_email OR query caused 400s when that column doesn't exist.
       const { data: opd } = await supabase
         .from('opd_appointments')
         .select('id, appointment_date, time_slot, status, doctors:doctor_id(full_name, specialization, selfie_url)')
-        .eq('patient_name', user.displayName ?? user.email ?? '')
+        .eq('patient_id', user.uid)
         .order('appointment_date', { ascending: false })
         .limit(2);
 
@@ -130,15 +132,19 @@ interface HomeScreenProps {
   onReferEarn: () => void;
   onHelpCentre: () => void;
   onRecords: () => void;
+  onFindDoctor?: (specialty: string) => void;
+  onVoiceSubmit?: (symptoms: string[], description: string, sinceWhen: string, mode: 'instant' | 'available') => void;
 }
 
 export function HomeScreen({
   user, walletBalance, onRecharge,
   onConsultNow, onBookDoctor, onProfile, onNotifications,
   onBookAppointment, onReferEarn, onHelpCentre, onRecords,
+  onFindDoctor, onVoiceSubmit,
 }: HomeScreenProps) {
   const [showWallet, setShowWallet] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [showVoice, setShowVoice] = useState(false);
 
   useEffect(() => {
     const firebaseUser = getCurrentUser();
@@ -187,7 +193,27 @@ export function HomeScreen({
               Hi, {user.name?.split(' ')[0] || 'there'} 👋
             </h1>
           </div>
-          <div className="flex gap-2">
+          <div className="flex gap-2 items-center">
+            {/* Voice Assistant toggle — tap to open/close */}
+            <button
+              onClick={() => setShowVoice(v => !v)}
+              className={`relative flex items-center gap-1.5 px-3 py-2 rounded-full transition-all duration-200 ${
+                showVoice
+                  ? 'bg-white text-primary font-bold shadow-md'
+                  : 'bg-primary-foreground/10 text-primary-foreground'
+              }`}
+              aria-label={showVoice ? 'Turn off voice assistant' : 'Turn on voice assistant'}
+            >
+              <Mic className={`w-4 h-4 ${showVoice ? 'text-primary' : 'text-primary-foreground'}`} />
+              <span className={`text-[11px] font-bold leading-none ${
+                showVoice ? 'text-primary' : 'text-primary-foreground/80'
+              }`}>
+                {showVoice ? 'ON' : 'OFF'}
+              </span>
+              {showVoice && (
+                <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 bg-green-400 rounded-full border-2 border-background animate-pulse" />
+              )}
+            </button>
             <button
               onClick={onNotifications}
               className="relative p-2 rounded-full bg-primary-foreground/10 backdrop-blur"
@@ -274,6 +300,27 @@ export function HomeScreen({
           currentBalance={walletBalance}
           onRecharge={(amt) => { onRecharge(amt); }}
           onClose={() => setShowWallet(false)}
+        />
+      )}
+
+      {/* Voice Assistant Modal */}
+      {showVoice && (
+        <VoiceAssistantModal
+          onClose={() => setShowVoice(false)}
+          walletBalance={walletBalance}
+          onFindDoctor={(specialty) => {
+            setShowVoice(false);
+            if (onFindDoctor) onFindDoctor(specialty);
+            else onConsultNow();
+          }}
+          onSelectDoctor={(_doctor, _callType) => {
+            setShowVoice(false);
+            onConsultNow();
+          }}
+          onVoiceSubmit={(symptoms, description, sinceWhen, mode) => {
+            setShowVoice(false);
+            if (onVoiceSubmit) onVoiceSubmit(symptoms, description, sinceWhen, mode);
+          }}
         />
       )}
     </div>

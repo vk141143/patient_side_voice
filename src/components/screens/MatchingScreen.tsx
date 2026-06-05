@@ -81,6 +81,10 @@ export function MatchingScreen({
         .eq('patient_id', user.uid)
         .eq('status', 'searching');
 
+      // Pick up sinceWhen duration from voice assistant if set
+      const voiceDuration = localStorage.getItem('mc_voice_duration') || duration || null;
+      if (voiceDuration) localStorage.removeItem('mc_voice_duration');
+
       const { data, error } = await supabase
         .from('consultation_requests')
         .insert({
@@ -88,7 +92,7 @@ export function MatchingScreen({
           patient_name: patientName,
           specialty: symptoms[0] ?? 'General Physician',
           description: description ?? null,
-          duration: duration ?? null,
+          duration: voiceDuration,
           severity: severity ?? null,
           report_url: reportUrl ?? null,
           status: 'searching',

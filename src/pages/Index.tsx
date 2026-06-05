@@ -145,7 +145,23 @@ function AppContent() {
       case 'forgot-password': return <ForgotPasswordScreen onBack={() => setCurrentScreen('login')} onSuccess={() => setCurrentScreen('login')} />;
 
       // Main app
-      case 'home': return <HomeScreen user={user} walletBalance={walletBalance} onRecharge={handleRecharge} onConsultNow={() => setCurrentScreen('symptoms')} onBookDoctor={() => setCurrentScreen('consultation-type')} onProfile={() => setCurrentScreen('user-profile')} onNotifications={() => setCurrentScreen('user-notifications')} onConsultAgain={() => setCurrentScreen('symptoms')} onBookAppointment={() => setCurrentScreen('select-specialty')} onReferEarn={() => setCurrentScreen('user-profile')} onHelpCentre={() => setCurrentScreen('user-profile')} onRecords={() => setCurrentScreen('records')} />;
+      case 'home': return <HomeScreen user={user} walletBalance={walletBalance} onRecharge={handleRecharge} onConsultNow={() => setCurrentScreen('symptoms')} onBookDoctor={() => setCurrentScreen('consultation-type')} onProfile={() => setCurrentScreen('user-profile')} onNotifications={() => setCurrentScreen('user-notifications')} onConsultAgain={() => setCurrentScreen('symptoms')} onBookAppointment={() => setCurrentScreen('select-specialty')} onReferEarn={() => setCurrentScreen('user-profile')} onHelpCentre={() => setCurrentScreen('user-profile')} onRecords={() => setCurrentScreen('records')}
+        onFindDoctor={(specialty) => { updateSearchedSpecialty(specialty); setConsultMode('available'); localStorage.setItem('mc_consult_mode', 'available'); setCurrentScreen('available-doctors'); }}
+        onVoiceSubmit={(symptoms, description, sinceWhen, mode) => {
+          // Voice assistant feeds into the EXACT same pipeline as SymptomsScreen.
+          // MatchingScreen creates consultation_requests row with specialty + description + duration
+          // so doctor side realtime listener fires and gets all symptom details.
+          setSelectedSymptoms(symptoms);
+          updateSearchedSpecialty(symptoms[0] || 'General Physician');
+          setSymptomData({ description, symptoms, reportUrl: undefined });
+          setConsultMode(mode);
+          localStorage.setItem('mc_consult_mode', mode);
+          // Pass sinceWhen as duration — MatchingScreen forwards it to consultation_requests.duration
+          // so doctor sees how long patient has had symptoms
+          if (sinceWhen) localStorage.setItem('mc_voice_duration', sinceWhen);
+          setCurrentScreen(mode === 'available' ? 'available-doctors' : 'matching');
+        }}
+      />;
 
       // Consult Now flow
       case 'symptoms': return <SymptomsScreen onSubmit={(symptoms, desc, reportUrl, mode) => {

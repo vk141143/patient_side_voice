@@ -49,3 +49,27 @@ BEGIN
   WHERE id = user_id;
 END;
 $$ LANGUAGE plpgsql;
+
+-- ── Voice Assistant Sessions ──────────────────────────────────────
+-- Stores each voice consultation session for analytics and audit.
+CREATE TABLE IF NOT EXISTS voice_assistant_sessions (
+  id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id             TEXT NOT NULL,
+  language            TEXT NOT NULL,
+  transcript          TEXT NOT NULL,
+  detected_symptoms   TEXT[] DEFAULT '{}',
+  doctor_type         TEXT,
+  confidence          TEXT,
+  created_at          TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE voice_assistant_sessions ENABLE ROW LEVEL SECURITY;
+
+-- Users can only insert and read their own sessions
+CREATE POLICY "Voice sessions: user insert"
+  ON voice_assistant_sessions FOR INSERT
+  WITH CHECK (auth.uid()::text = user_id);
+
+CREATE POLICY "Voice sessions: user select"
+  ON voice_assistant_sessions FOR SELECT
+  USING (auth.uid()::text = user_id);
