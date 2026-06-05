@@ -150,13 +150,18 @@ export function VoiceAssistantModal({
     const locale = TTS_LOCALE[l];
     const speak = () => {
       const voices = window.speechSynthesis.getVoices();
+      const femaleTerms = /female|woman|zira|heera|lekha|neerja|veena|moira|samantha|karen|tessa|fiona|victoria|allison|ava|susan|google uk english female/i;
+      const malTerms = /male|man|david|mark|daniel|alex|fred|jorge|diego|rishi|mohan/i;
+      const langCode = locale.split('-')[0];
       const pick =
-        voices.find(v => v.lang === locale && /female|woman|zira|heera|lekha|neerja/i.test(v.name)) ||
-        voices.find(v => v.lang.startsWith(locale.split('-')[0]) && /female|woman|zira|heera|lekha|neerja/i.test(v.name)) ||
+        voices.find(v => v.lang === locale && femaleTerms.test(v.name)) ||
+        voices.find(v => v.lang.startsWith(langCode) && femaleTerms.test(v.name)) ||
+        voices.find(v => v.lang === locale && !malTerms.test(v.name)) ||
+        voices.find(v => v.lang.startsWith(langCode) && !malTerms.test(v.name)) ||
         voices.find(v => v.lang === locale) ||
-        voices.find(v => v.lang.startsWith(locale.split('-')[0])) || null;
+        voices.find(v => v.lang.startsWith(langCode)) || null;
       const utt = new SpeechSynthesisUtterance(text);
-      utt.lang = locale; utt.rate = 0.92; utt.pitch = 1.1;
+      utt.lang = locale; utt.rate = 0.92; utt.pitch = 1.15;
       if (pick) utt.voice = pick;
       utt.onend = () => { ttsGuardRef.current = false; setIsSpeaking(false); onDone?.(); };
       utt.onerror = () => { ttsGuardRef.current = false; setIsSpeaking(false); onDone?.(); };
