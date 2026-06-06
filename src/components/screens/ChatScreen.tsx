@@ -896,9 +896,11 @@ export function ChatScreen({
                 }}>View Prescription</Button>
               )}
               <Button variant="outline" size="lg" className="w-full" onClick={async () => {
-                // Deduct wallet when doctor ends the session
                 if (consultationFee > 0) await deductWallet(consultationFee);
-                onEndSession(latestRxId ?? undefined, sessionId ?? undefined);
+                localStorage.removeItem('mc_consult_id');
+                if (sessionId) await clearSession(sessionId);
+                setSessionEnded(false);
+                onBack();
               }}>Go Home</Button>
             </div>
           </div>
