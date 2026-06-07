@@ -60,6 +60,7 @@ export function ChatScreen({
   const userTypingThrottleRef = useRef<any>(null);
   const [videoCallSessionId, setVideoCallSessionId] = useState<string | null>(null);
   const [showVideoConfirm, setShowVideoConfirm] = useState(false);
+  const [showVideoWaiting, setShowVideoWaiting] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -159,10 +160,14 @@ export function ChatScreen({
               typingTimeoutRef.current = setTimeout(() => setDoctorTyping(false), 3000);
               return;
             } else if (msg.content?.startsWith('__video_call__:') && msg.sender_role === 'doctor') {
-              // Doctor is inviting patient to video call — show popup, do NOT auto-navigate
+              // Doctor accepted patient request OR doctor is initiating — show Accept/Decline popup
               const vcSessionId = msg.content.split(':')[1];
               setVideoCallSessionId(vcSessionId);
+              setShowVideoWaiting(false); // dismiss waiting popup if open
               setShowVideoConfirm(true);
+              return;
+            } else if (msg.content === '__video_call_declined__' && msg.sender_role === 'doctor') {
+              setShowVideoWaiting(false);
               return;
             } else if (msg.content?.startsWith('__time_extended__:') && msg.sender_role === 'doctor') {
               const secs = parseInt(msg.content.split(':')[1], 10);
@@ -459,7 +464,11 @@ export function ChatScreen({
     if (msg.type === 'system' && (
       msg.content === '__timer_pause__' ||
       msg.content === '__timer_resume__' ||
-      msg.content?.startsWith('__time_extended__:')
+      msg.content?.startsWith('__time_extended__:') ||
+      msg.content?.startsWith('__video_request__:') ||
+      msg.content?.startsWith('__video_call__:') ||
+      msg.content === '__video_request_cancelled__' ||
+      msg.content === '__video_call_declined__'
     )) {
       return <div key={msg.id} style={{ display: 'none' }} />;
     }
@@ -648,18 +657,17 @@ export function ChatScreen({
         {onVideoCall && sessionId && (
           <button
             onClick={async () => {
-              // Notify doctor that patient wants video call
-              if (user) {
-                await supabase.from('instant_chat_messages').insert({
-                  session_id: sessionId,
-                  sender_id: user.uid,
-                  sender_role: 'patient',
-                  type: 'system',
-                  content: `__video_call__:${sessionId}`,
-                  is_read: false,
-                });
-              }
-              onVideoCall(sessionId);
+              if (!user) return;
+              // Send video REQUEST to doctor — doctor will see Accept/Decline popup
+              await supabase.from('instant_chat_messages').insert({
+                session_id: sessionId,
+                sender_id: user.uid,
+                sender_role: 'patient',
+                type: 'system',
+                content: `__video_request__:${sessionId}`,
+                is_read: false,
+              });
+              setShowVideoWaiting(true);
             }}
             className="w-9 h-9 flex items-center justify-center rounded-full bg-blue-500/10 hover:bg-blue-500/20 transition-colors flex-shrink-0">
             <Video className="w-4 h-4 text-blue-500" />
@@ -906,25 +914,65 @@ export function ChatScreen({
           </div>
         </div>
       )}
-      {/* Video Call Invitation */}
+      {/* Patient waiting for doctor to accept video request */}
+      {showVideoWaiting && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center px-4" style={{ background: 'rgba(0,0,0,0.8)' }}>
+          <div className="bg-background rounded-2xl p-6 text-center w-full max-w-sm shadow-2xl">
+            <div className="w-16 h-16 rounded-full bg-blue-100 flex items-center justify-center mx-auto mb-4">
+              <Loader2 className="w-8 h-8 text-blue-500 animate-spin" />
+            </div>
+            <h2 className="text-lg font-bold text-foreground mb-2">Waiting for Doctor...</h2>
+            <p className="text-sm text-muted-foreground mb-6 leading-relaxed">
+              Your video consultation request has been sent to Dr. {doctorName}. Please wait for them to accept.
+            </p>
+            <Button variant="outline" size="lg" className="w-full" onClick={async () => {
+              setShowVideoWaiting(false);
+              if (sessionId && user) {
+                await supabase.from('instant_chat_messages').insert({
+                  session_id: sessionId,
+                  sender_id: user.uid,
+                  sender_role: 'patient',
+                  type: 'system',
+                  content: '__video_request_cancelled__',
+                  is_read: false,
+                });
+              }
+            }}>Cancel Request</Button>
+          </div>
+        </div>
+      )}
+
+      {/* Doctor invited/accepted video call — patient sees Accept/Decline */}
       {showVideoConfirm && onVideoCall && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center px-4" style={{ background: 'rgba(0,0,0,0.8)' }}>
           <div className="bg-background rounded-2xl p-6 text-center w-full max-w-sm shadow-2xl">
             <div className="w-16 h-16 rounded-full bg-blue-100 flex items-center justify-center mx-auto mb-4 animate-pulse">
               <Video className="w-8 h-8 text-blue-500" />
             </div>
-            <h2 className="text-lg font-bold text-foreground mb-2">Video Call Invitation</h2>
+            <h2 className="text-lg font-bold text-foreground mb-2">Video Consultation</h2>
             <p className="text-sm text-muted-foreground mb-6 leading-relaxed">
-              Dr. {doctorName} is inviting you to a video consultation.
+              Dr. {doctorName} is suggesting a video consultation. Would you like to join?
             </p>
             <div className="space-y-3">
               <Button variant="hero" size="lg" className="w-full bg-blue-500 hover:bg-blue-600" onClick={() => {
                 setShowVideoConfirm(false);
                 if (videoCallSessionId) onVideoCall(videoCallSessionId);
               }}>
-                <Video className="w-4 h-4" /> Join Video Call
+                <Video className="w-4 h-4" /> Accept & Join
               </Button>
-              <Button variant="outline" size="lg" className="w-full" onClick={() => setShowVideoConfirm(false)}>Decline</Button>
+              <Button variant="outline" size="lg" className="w-full text-destructive border-destructive/30" onClick={async () => {
+                setShowVideoConfirm(false);
+                if (sessionId && user) {
+                  await supabase.from('instant_chat_messages').insert({
+                    session_id: sessionId,
+                    sender_id: user.uid,
+                    sender_role: 'patient',
+                    type: 'system',
+                    content: '__video_call_declined__',
+                    is_read: false,
+                  });
+                }
+              }}>Decline</Button>
             </div>
           </div>
         </div>

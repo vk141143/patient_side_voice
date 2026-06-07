@@ -214,11 +214,7 @@ export function VideoCallScreen({ sessionId, doctorName, onLeave }: VideoCallScr
           <p className="text-white font-semibold text-sm">Video Call</p>
           <p className="text-gray-400 text-xs">Dr. {doctorName}</p>
         </div>
-        <button
-          onClick={onLeave}
-          className="text-gray-400 hover:text-white text-xs transition-colors">
-          ✕ Exit
-        </button>
+
       </div>
       <div className="flex-1 min-h-0 relative">
         <MeetingProvider

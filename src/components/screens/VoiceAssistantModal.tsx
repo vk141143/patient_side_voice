@@ -128,6 +128,12 @@ export function VoiceAssistantModal({
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
       mediaRef.current = stream;
+      // Unlock AudioContext on mobile (must happen inside user gesture)
+      try {
+        const ctx = new AudioContext();
+        if (ctx.state === 'suspended') await ctx.resume();
+        ctx.close();
+      } catch { /* ignore */ }
       setStep('language');
     } catch {
       setPermState('denied');
@@ -138,6 +144,7 @@ export function VoiceAssistantModal({
   // ── Native Speech Recognition ─────────────────────────────────
   const abortRecognition = () => {
     if (recognitionRef.current) {
+      try { recognitionRef.current.stop(); } catch { /* ignore */ }
       try { recognitionRef.current.abort(); } catch { /* ignore */ }
       recognitionRef.current = null;
     }
@@ -153,11 +160,12 @@ export function VoiceAssistantModal({
       return;
     }
 
-    // abort previous instance
     if (recognitionRef.current) {
+      try { recognitionRef.current.stop(); } catch { /* ignore */ }
       try { recognitionRef.current.abort(); } catch { /* ignore */ }
       recognitionRef.current = null;
     }
+    if (silenceTimerRef.current) { clearTimeout(silenceTimerRef.current); silenceTimerRef.current = null; }
 
     transcriptRef.current = '';
     gotResultRef.current = false;
@@ -166,11 +174,12 @@ export function VoiceAssistantModal({
     const rec = new SR();
     recognitionRef.current = rec;
     rec.lang = locale;
-    rec.continuous = false;      // single-utterance: most reliable on Android/iOS
+    // continuous: true so mobile doesn't cut off mid-sentence
+    // On iOS Safari continuous is ignored but still works for one utterance
+    rec.continuous = true;
     rec.interimResults = true;
     rec.maxAlternatives = 1;
 
-    // reuse existing granted stream for volume
     if (mediaRef.current && mediaRef.current.active) {
       startVol(mediaRef.current);
     }
@@ -189,39 +198,85 @@ export function VoiceAssistantModal({
         transcriptRef.current = (transcriptRef.current + ' ' + finalText).trim();
         gotResultRef.current = true;
         setTranscript(transcriptRef.current);
-        // 1 s silence → process
+        // reset silence window on every new final word
         if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
         silenceTimerRef.current = setTimeout(() => {
           silenceTimerRef.current = null;
           abortRecognition();
           onResult(transcriptRef.current.trim());
-        }, 1000);
+        }, 2000); // 2s silence → process (longer than desktop to handle mobile pauses)
       } else if (interimText) {
         setTranscript((transcriptRef.current + ' ' + interimText).trim());
+        // reset silence window on interim too — user is still speaking
+        if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+        silenceTimerRef.current = setTimeout(() => {
+          silenceTimerRef.current = null;
+          abortRecognition();
+          if (transcriptRef.current.trim()) onResult(transcriptRef.current.trim());
+        }, 2500);
       }
     };
 
     rec.onend = () => {
-      recognitionRef.current = null;
-      setIsListening(false);
-      stopVol();
-      // only fire if we have speech AND silence timer hasn't fired yet
-      if (gotResultRef.current && transcriptRef.current.trim() && silenceTimerRef.current === null) {
-        onResult(transcriptRef.current.trim());
+      // On mobile, continuous recognition can end unexpectedly — restart if we haven't
+      // processed yet and the silence timer is still running
+      if (silenceTimerRef.current !== null) {
+        // timer is pending, let it fire naturally — don't restart
+        recognitionRef.current = null;
+        setIsListening(false);
+        stopVol();
+        return;
       }
-      // intentionally NO restart → prevents the infinite mobile loop
+      // No timer pending — check if we got something to process
+      if (gotResultRef.current && transcriptRef.current.trim()) {
+        recognitionRef.current = null;
+        setIsListening(false);
+        stopVol();
+        onResult(transcriptRef.current.trim());
+        return;
+      }
+      // Got nothing — restart silently so user doesn't have to tap again
+      // (mobile drops recognition randomly, especially on first attempt)
+      recognitionRef.current = null;
+      if (!gotResultRef.current) {
+        setIsListening(false);
+        stopVol();
+        // Small delay before restart to avoid rapid-fire on iOS
+        setTimeout(() => {
+          if (langRef.current) {
+            startRecognition(locale, purpose, onResult);
+          }
+        }, 300);
+      } else {
+        setIsListening(false);
+        stopVol();
+      }
     };
 
     rec.onerror = (e: any) => {
-      recognitionRef.current = null;
-      setIsListening(false);
-      stopVol();
       if (e.error === 'not-allowed') {
+        recognitionRef.current = null;
+        setIsListening(false);
+        stopVol();
         setPermState('denied');
         setErrorMsg('Microphone access denied.');
         setStep('error');
+        return;
       }
-      // 'no-speech', 'network', 'aborted' → silently ignore, user taps mic to retry
+      if (e.error === 'aborted') {
+        // intentional abort — do nothing
+        return;
+      }
+      // 'no-speech', 'network', 'audio-capture' on mobile — restart
+      recognitionRef.current = null;
+      if (!gotResultRef.current) {
+        setTimeout(() => {
+          if (langRef.current) startRecognition(locale, purpose, onResult);
+        }, 300);
+      } else {
+        setIsListening(false);
+        stopVol();
+      }
     };
 
     try { rec.start(); } catch { setIsListening(false); }
