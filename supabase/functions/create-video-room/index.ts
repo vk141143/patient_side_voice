@@ -25,12 +25,30 @@ serve(async (req) => {
       });
     }
 
-    const VIDEOSDK_TOKEN = Deno.env.get('DAILY_API_KEY'); // reusing same secret slot
-    if (!VIDEOSDK_TOKEN) {
-      return new Response(JSON.stringify({ error: 'VIDEOSDK token not configured' }), {
+    const VIDEOSDK_API_KEY = Deno.env.get('VIDEOSDK_API_KEY');
+    const VIDEOSDK_SECRET  = Deno.env.get('VIDEOSDK_SECRET');
+    if (!VIDEOSDK_API_KEY || !VIDEOSDK_SECRET) {
+      return new Response(JSON.stringify({ error: 'VIDEOSDK credentials not configured' }), {
         status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
+
+    // Generate a fresh JWT signed with the secret (valid 24 h)
+    const encoder = new TextEncoder();
+    const keyData = encoder.encode(VIDEOSDK_SECRET);
+    const cryptoKey = await crypto.subtle.importKey(
+      'raw', keyData, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']
+    );
+    const header  = btoa(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).replace(/=/g,'').replace(/\+/g,'-').replace(/\//g,'_');
+    const payload = btoa(JSON.stringify({
+      apikey: VIDEOSDK_API_KEY,
+      permissions: ['allow_join', 'allow_mod'],
+      iat: Math.floor(Date.now() / 1000),
+      exp: Math.floor(Date.now() / 1000) + 86400, // 24 hours
+    })).replace(/=/g,'').replace(/\+/g,'-').replace(/\//g,'_');
+    const sigBuf  = await crypto.subtle.sign('HMAC', cryptoKey, encoder.encode(`${header}.${payload}`));
+    const sig     = btoa(String.fromCharCode(...new Uint8Array(sigBuf))).replace(/=/g,'').replace(/\+/g,'-').replace(/\//g,'_');
+    const VIDEOSDK_TOKEN = `${header}.${payload}.${sig}`;
 
     // Create a new VideoSDK room for this session
     const createRes = await fetch('https://api.videosdk.live/v2/rooms', {
@@ -48,7 +66,7 @@ serve(async (req) => {
 
     // If room already exists with that customRoomId, VideoSDK returns the existing one
     if (!createRes.ok && createData?.message !== 'Room already exists') {
-      console.error('VideoSDK create room error:', createData);
+      console.error('[create-video-room] VideoSDK error:', JSON.stringify(createData));
       return new Response(JSON.stringify({ error: 'Failed to create room', detail: createData }), {
         status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
